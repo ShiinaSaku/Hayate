@@ -69,8 +69,8 @@ TMP_DIR=$(mktemp -d)
 TMP_BIN="${TMP_DIR}/${BINARY_NAME}"
 
 log_info "Downloading ${ASSET_NAME} (${LATEST_TAG})..."
-if ! curl -# -sL -o "$TMP_BIN" "$DOWNLOAD_URL"; then
-    log_error "Download failed. Please check your network connection."
+if ! curl -# -sLf -o "$TMP_BIN" "$DOWNLOAD_URL"; then
+    log_error "Download failed, Please check your network connection."
 fi
 
 log_info "Installing to ${INSTALL_DIR}..."
