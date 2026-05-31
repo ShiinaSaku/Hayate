@@ -3,12 +3,10 @@ $ErrorActionPreference = "Stop"
 $Repo = "ShiinaSaku/Hayate"
 $BinaryName = "hayate.exe"
 
-Write-Host "`n  _   _    _ __   __  _  _____  ___ " -ForegroundColor Cyan
-Write-Host " | | | |  / \ \ / / / \|_   _|/ _ \" -ForegroundColor Cyan
-Write-Host " | |_| | / _ \ \ V / / _ \ | | |  _/" -ForegroundColor Cyan
-Write-Host " |  _  |/ ___ \ | | / ___ \| | | |  " -ForegroundColor Cyan
-Write-Host " |_| |_/_/   \_\_|/_/   \_\_| \___|" -ForegroundColor Cyan
-Write-Host " Swift Cross-Device File Transfer`n"
+Write-Host "`n _     _   _______   __   __   _______   _______   _______  " -ForegroundColor Magenta
+Write-Host " |_____|   |_____|     \_/     |_____|      |      |______  " -ForegroundColor Magenta
+Write-Host " |     |   |     |      |      |     |      |      |______  " -ForegroundColor Magenta
+Write-Host "  Swift Cross-Device File Transfer`n"
 
 Write-Host "[*] Detecting Windows environment..." -ForegroundColor DarkGray
 
@@ -58,6 +56,6 @@ if ($UserPath -notmatch [regex]::Escape($InstallDir)) {
     $env:PATH = "$env:PATH;$InstallDir"
 }
 
-Write-Host "[OK] Hayate $LatestTag installed successfully." -ForegroundColor Green
+Write-Host "[+] Hayate $LatestTag installed successfully!" -ForegroundColor Green
 Write-Host "[*] You may need to restart your terminal for the PATH changes to take effect." -ForegroundColor DarkGray
-Write-Host "[*] Run 'hayate --help' to get started.`n" -ForegroundColor DarkGray
+Write-Host "[*] Run 'hayate help' to get started.`n" -ForegroundColor DarkGray

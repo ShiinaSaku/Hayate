@@ -4,26 +4,27 @@ set -e
 REPO="ShiinaSaku/Hayate"
 BINARY_NAME="hayate"
 
+# High-fidelity terminal colors
 CYAN='\033[0;36m'
+INDIGO='\033[0;35m'
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 GRAY='\033[1;30m'
 NC='\033[0m'
 
-echo -e "${CYAN}"
+echo -e "${INDIGO}"
 cat << "EOF"
-  _   _    _ __   __  _  _____  ___ 
- | | | |  / \ \ / / / \|_   _|/ _ \
- | |_| | / _ \ \ V / / _ \ | | |  _/
- |  _  |/ ___ \ | | / ___ \| | | |  
- |_| |_/_/   \_\_|/_/   \_\_| \___|
+ _     _   _______   __   __   _______   _______   _______  
+ |_____|   |_____|     \_/     |_____|      |      |______  
+ |     |   |     |      |      |     |      |      |______  
 EOF
-echo -e " Swift Cross-Device File Transfer${NC}\n"
+echo -e "  Swift Cross-Device File Transfer${NC}\n"
 
-log_info() { echo -e "${GRAY}[*]${NC} $1"; }
-log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
-log_error() { echo -e "${RED}[ERR]${NC} $1"; exit 1; }
+log_info() { echo -e "${CYAN}[*]${NC} $1"; }
+log_success() { echo -e "${GREEN}[+]${NC} $1"; }
+log_error() { echo -e "${RED}[-]${NC} $1"; exit 1; }
 
+# OS detection
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$OS" in
     linux) OS_TARGET="linux" ;;
@@ -31,6 +32,7 @@ case "$OS" in
     *) log_error "Unsupported operating system: $OS" ;;
 esac
 
+# Architecture detection
 ARCH="$(uname -m)"
 case "$ARCH" in
     x86_64|amd64) ARCH_TARGET="amd64" ;;
@@ -39,8 +41,9 @@ case "$ARCH" in
     *) log_error "Unsupported architecture: $ARCH" ;;
 esac
 
-log_info "Detected environment: $OS_TARGET-$ARCH_TARGET"
+log_info "Detected target environment: ${OS_TARGET}-${ARCH_TARGET}"
 
+# Determine installation directory and if sudo is required
 if [ -n "$PREFIX" ] && [[ "$PREFIX" == *com.termux* ]]; then
     log_info "Termux environment detected."
     INSTALL_DIR="$PREFIX/bin"
@@ -50,37 +53,43 @@ else
     if [ -w "$INSTALL_DIR" ]; then
         USE_SUDO=""
     else
-        log_info "Elevated privileges required to install to $INSTALL_DIR"
+        log_info "Elevated privileges required to install to ${INSTALL_DIR}"
         USE_SUDO="sudo"
     fi
 fi
 
-log_info "Fetching latest release metadata..."
-# Rate-limit proof: Bypasses API entirely and extracts tag from redirect URL
+log_info "Resolving latest release tag from GitHub..."
+# Rate-limit proof redirection resolver
 LATEST_TAG=$(curl -sLI -o /dev/null -w "%{url_effective}" "https://github.com/${REPO}/releases/latest" | sed 's|.*/||')
 
 if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "latest" ]; then
-    log_error "Failed to fetch the latest release tag. Check repository visibility."
+    log_error "Failed to fetch latest release tag. Please verify network or repository settings."
 fi
 
-ASSET_NAME="${BINARY_NAME}-${OS_TARGET}-${ARCH_TARGET}"
+# Select target build asset
+if [ -n "$PREFIX" ] && [[ "$PREFIX" == *com.termux* ]] && [ "$ARCH_TARGET" = "arm64" ]; then
+    ASSET_NAME="${BINARY_NAME}-termux-arm64"
+else
+    ASSET_NAME="${BINARY_NAME}-${OS_TARGET}-${ARCH_TARGET}"
+fi
+
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_TAG}/${ASSET_NAME}"
 TMP_DIR=$(mktemp -d)
 TMP_BIN="${TMP_DIR}/${BINARY_NAME}"
 
 log_info "Downloading ${ASSET_NAME} (${LATEST_TAG})..."
 if ! curl -# -sLf -o "$TMP_BIN" "$DOWNLOAD_URL"; then
-    log_error "Download failed, Please check your network connection."
+    log_error "Download failed. Please check connection and verify if binary exists for this platform."
 fi
 
-log_info "Installing to ${INSTALL_DIR}..."
+log_info "Configuring permissions and installing to ${INSTALL_DIR}..."
 chmod +x "$TMP_BIN"
 
 if ! $USE_SUDO mv "$TMP_BIN" "${INSTALL_DIR}/${BINARY_NAME}"; then
-    log_error "Failed to move binary to $INSTALL_DIR. Do you have the right permissions?"
+    log_error "Failed to move binary to ${INSTALL_DIR}. Check permissions or rerun with sudo."
 fi
 
 rm -rf "$TMP_DIR"
 
-log_success "Hayate ${LATEST_TAG} installed successfully."
-echo -e "${GRAY}Run 'hayate --help' to get started.${NC}"
+log_success "Hayate ${LATEST_TAG} installed successfully!"
+echo -e "${GRAY}Get started by running 'hayate help' or 'hayate send <file>'${NC}"
