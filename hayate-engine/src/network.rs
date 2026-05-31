@@ -66,7 +66,6 @@ pub fn client_config() -> Result<ClientConfig, EngineError> {
     Ok(ClientConfig::new(Arc::new(quic_client)))
 }
 
-
 /// Creates a QUIC listener endpoint bound to `addr`.
 pub async fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
     let cfg = server_config()?;

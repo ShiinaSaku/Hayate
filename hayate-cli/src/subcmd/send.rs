@@ -38,7 +38,6 @@ pub async fn run(args: SendArgs) -> Result<()> {
             .next()
             .context("could not resolve target")?;
 
-
         output::info(&format!("Connecting to {target_addr}..."));
 
         let endpoint = network::bind_client().await?;

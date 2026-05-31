@@ -15,8 +15,6 @@
     clippy::must_use_candidate
 )]
 
-
-
 pub mod crypto;
 pub mod discovery;
 pub mod error;

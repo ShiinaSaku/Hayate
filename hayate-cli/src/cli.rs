@@ -82,8 +82,6 @@ pub struct SendArgs {
     pub no_progress: bool,
 }
 
-
-
 #[derive(clap::Args, Debug)]
 pub struct DiscoverArgs {
     /// Network scan timeout in seconds.

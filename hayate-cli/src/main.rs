@@ -18,4 +18,3 @@ fn main() -> Result<()> {
     // IOCP / kqueue completion queue, no work-stealing scheduler.
     compio::runtime::Runtime::new()?.block_on(subcmd::dispatch(cli))
 }
-

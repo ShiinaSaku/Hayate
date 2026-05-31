@@ -47,10 +47,11 @@ pub fn print_banner() {
         style("|").dim(),
         style(format!("v{VERSION}")).cyan().bold()
     );
-    println!("   {}\n", style("Secure, Encrypted, & Compressed").dim().yellow());
+    println!(
+        "   {}\n",
+        style("Secure, Encrypted, & Compressed").dim().yellow()
+    );
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Status lines
