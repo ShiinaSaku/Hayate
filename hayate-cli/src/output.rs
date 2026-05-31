@@ -15,21 +15,41 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // ---------------------------------------------------------------------------
 
 pub fn print_banner() {
-    let logo = r#"
-    __  __ ___ __  __  ___  _____ ___ 
-   / / / // _ \\ \/ / / _ \ |_   _|| __|
-  / /_/ // ___ \\  / / ___ \  | |  | _| 
- /_/\_/_/_/   \_//_/ /_/   \_\|_|  |___|
+    let term = console::Term::stdout();
+    let width = term.size_checked().map(|(_, w)| w).unwrap_or(80);
+
+    if width >= 65 {
+        // Vibrant cyan styling for the new high-tech cybersecurity logo
+        let logo = r#"
+  __   __     _____    __  __    _____    _______     _____  
+ /\_\ /_/\   /\___/\ /\  /\  /\ /\___/\ /\_______)\ /\_____\ 
+( ( (_) ) ) / / _ \ \\ \ \/ / // / _ \ \\(___  __\/( (_____/ 
+ \ \___/ /  \ \(_)/ / \ \__/ / \ \(_)/ /  / / /     \ \__\   
+ / / _ \ \  / / _ \ \  \__/ /  / / _ \ \ ( ( (      / /__/_  
+( (_( )_) )( (_( )_) ) / / /  ( (_( )_) ) \ \ \    ( (_____\ 
+ \/_/ \_\/  \/_/ \_\/  \/_/    \/_/ \_\/  /_/_/     \/_____/ 
 "#;
-    println!("{}", style(logo).bold().cyan());
+        println!("{}", style(logo).bold().cyan());
+    } else {
+        // Scaled fallback logo for narrow screen sizes (e.g. mobile/Termux portrait)
+        let logo = r#"
+  _  _  _  _  _  _ ___ ___ 
+ | || |/ _ \| || / _ \ | | 
+ | __ | (_) \  / | (_) | | 
+ |_||_|\___/ \/   \___/|_| 
+"#;
+        println!("{}", style(logo).bold().cyan());
+    }
+
     println!(
         "   {} {} {}",
-        style("Swift File Transfer").bold(),
+        style("Swift File Transfer").bold().green(),
         style("|").dim(),
-        style(format!("v{VERSION}")).cyan()
+        style(format!("v{VERSION}")).cyan().bold()
     );
-    println!("   {}\n", style("Secure, Encrypted, & Compressed").dim());
+    println!("   {}\n", style("Secure, Encrypted, & Compressed").dim().yellow());
 }
+
 
 
 // ---------------------------------------------------------------------------
