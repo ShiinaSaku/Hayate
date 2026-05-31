@@ -20,21 +20,24 @@ pub async fn run(args: SendArgs) -> Result<()> {
         bail!("Path does not exist: {}", path.display());
     }
 
+    let target = args.peer.as_ref().or(args.target.as_ref());
+
     let (phrase, print_instruction) = if let Some(code) = &args.code {
         (code.clone(), false)
-    } else if args.target.is_none() {
+    } else if target.is_none() {
         let p = crate::words::generate_phrase();
         (p, true)
     } else {
         (String::new(), false)
     };
 
-    let (conn, passphrase) = if let Some(target_str) = &args.target {
+    let (conn, passphrase) = if let Some(target_str) = target {
         let target_addr = target_str
             .to_socket_addrs()
             .context("invalid target address")?
             .next()
             .context("could not resolve target")?;
+
 
         output::info(&format!("Connecting to {target_addr}..."));
 

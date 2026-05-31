@@ -48,8 +48,8 @@ pub struct ReceiveArgs {
     #[arg(long)]
     pub auto_accept: bool,
 
-    /// Suppress the TUI progress bar (useful in Termux / headless).
-    #[arg(long)]
+    /// Suppress the progress bar (useful in Termux / headless).
+    #[arg(long, alias = "no-tui")]
     pub no_progress: bool,
 
     /// Cryptographic code-phrase for pairing.
@@ -65,6 +65,10 @@ pub struct SendArgs {
     /// Receiver address in the form `ip:port` or `hostname:port`.
     pub target: Option<String>,
 
+    /// Receiver address in the form `ip:port` or `hostname:port` (compat option).
+    #[arg(long)]
+    pub peer: Option<String>,
+
     /// Cryptographic code-phrase for pairing.
     #[arg(long)]
     pub code: Option<String>,
@@ -73,10 +77,12 @@ pub struct SendArgs {
     #[arg(short = 'z', long)]
     pub compress: bool,
 
-    /// Suppress the TUI progress bar.
-    #[arg(long)]
+    /// Suppress the progress bar.
+    #[arg(long, alias = "no-tui")]
     pub no_progress: bool,
 }
+
+
 
 #[derive(clap::Args, Debug)]
 pub struct DiscoverArgs {
