@@ -167,9 +167,8 @@ where
         Err(e) => {
             if passphrase.is_some() {
                 return Err(EngineError::InvalidPassphrase);
-            } else {
-                return Err(e);
             }
+            return Err(e);
         }
     };
     let meta = Metadata::decode(&plain)?;
@@ -334,7 +333,7 @@ where
         let len_buf_owned = vec![0u8; 4];
         let compio::BufResult(result, len_buf) = stream.read_exact(len_buf_owned).await;
         match result {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(EngineError::Io(e)),
         }
@@ -401,7 +400,7 @@ where
             drop(tx);
         }
         handle.join().map_err(|_| {
-            EngineError::Io(io::Error::new(io::ErrorKind::Other, "extractor panicked"))
+            EngineError::Io(io::Error::other("extractor panicked"))
         })??;
     }
 

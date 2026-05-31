@@ -9,6 +9,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 /// Computes SHA-256 of the phrase and returns the first 4 bytes as a hex string.
+#[must_use]
 pub fn derive_channel_id(phrase: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(phrase.as_bytes());
@@ -38,7 +39,7 @@ pub async fn start_broadcaster(channel_id: String, port: u16) -> Result<(), io::
 }
 
 /// Listens for a UDP broadcast. If `target_phrase` is provided, it only yields a peer
-/// whose derived ChannelID matches. Otherwise, it yields the first peer detected.
+/// whose derived `ChannelID` matches. Otherwise, it yields the first peer detected.
 /// Returns the peer's resolved IP and port if found within the timeout.
 pub async fn listen_for_broadcast(
     target_phrase: Option<String>,
@@ -78,12 +79,10 @@ pub async fn listen_for_broadcast(
                                 Some(expected_id) => parts[1] == expected_id,
                                 None => true,
                             };
-                            if matches {
-                                if let Ok(port) = parts[3].parse::<u16>() {
-                                    let peer_addr = SocketAddr::new(src_addr.ip(), port);
-                                    let os = parts[2].to_owned();
-                                    return Ok(Some(("Hayate Peer".to_owned(), peer_addr, os)));
-                                }
+                            if matches && let Ok(port) = parts[3].parse::<u16>() {
+                                let peer_addr = SocketAddr::new(src_addr.ip(), port);
+                                let os = parts[2].to_owned();
+                                return Ok(Some(("Hayate Peer".to_owned(), peer_addr, os)));
                             }
                         }
                     }

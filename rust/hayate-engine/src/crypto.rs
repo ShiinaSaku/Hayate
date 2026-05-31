@@ -18,6 +18,7 @@ const TAG_LEN: usize = 16;
 
 /// Generates an ephemeral X25519 key pair.
 /// Returns `(secret, public_key_bytes)`.
+#[must_use]
 pub fn generate_keypair() -> (EphemeralSecret, [u8; 32]) {
     let secret = EphemeralSecret::random_from_rng(OsRng);
     let public = PublicKey::from(&secret);
@@ -49,7 +50,7 @@ pub fn derive_key(
 }
 
 /// Encrypts `plaintext` in-place inside `buf`, writing nonce + ciphertext + tag.
-/// `buf` must have capacity >= nonce_len + plaintext.len() + tag_len.
+/// `buf` must have capacity >= `nonce_len` + `plaintext.len()` + `tag_len`.
 /// Returns the byte slice `buf[..nonce_len + plaintext.len() + tag_len]`.
 pub fn encrypt_frame<'buf>(
     key: &[u8; 32],

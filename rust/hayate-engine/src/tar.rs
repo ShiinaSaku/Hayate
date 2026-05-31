@@ -73,7 +73,7 @@ pub fn estimate_dir_size(root_dir: &Path) -> u64 {
     walkdir::WalkDir::new(root_dir)
         .follow_links(false)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_type().is_file())
         .filter_map(|e| e.metadata().ok())
         .map(|m| m.len())
