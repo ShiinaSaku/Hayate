@@ -3,7 +3,6 @@
 #
 # Binaries for programs and plugins
 /hayate
-/hayate-*
 dist/
 *.exe
 *.exe~
@@ -34,4 +33,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+.DS_Store
+
+# Rust build directory
+target/
+
+# Editor/IDE and Agents
+.agents/
 .DS_Store

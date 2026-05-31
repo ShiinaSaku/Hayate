@@ -45,12 +45,9 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
         output::ok(&format!("Connected to {peer}"));
 
         let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
-        let (key, meta) = handshake_receiver_split(
-            &mut send_stream,
-            &mut recv_stream,
-            Some(code.as_str()),
-        )
-        .await?;
+        let (key, meta) =
+            handshake_receiver_split(&mut send_stream, &mut recv_stream, Some(code.as_str()))
+                .await?;
 
         let accept = if args.auto_accept {
             true
@@ -94,7 +91,7 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
         let elapsed = start.elapsed().as_secs_f64();
         output::print_transfer_summary(&meta.filename, meta.total_size, elapsed, &checksum, false);
         return Ok(());
-      }
+    }
 
     let bind_addr = SocketAddr::new(args.bind, args.port);
     let endpoint = network::bind_server(bind_addr).await?;
@@ -127,19 +124,14 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
             }
         };
 
-        let (key, meta) = match handshake_receiver_split(
-            &mut send_stream,
-            &mut recv_stream,
-            None,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                output::err(&format!("Handshake failed: {e}"));
-                continue;
-            }
-        };
+        let (key, meta) =
+            match handshake_receiver_split(&mut send_stream, &mut recv_stream, None).await {
+                Ok(r) => r,
+                Err(e) => {
+                    output::err(&format!("Handshake failed: {e}"));
+                    continue;
+                }
+            };
 
         let accept = if args.auto_accept {
             true

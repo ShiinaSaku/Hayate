@@ -52,7 +52,10 @@ pub async fn run(args: DiscoverArgs) -> Result<()> {
         .collect();
 
     // Always scan loopback (same-machine multi-tab discovery)
-    targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_PORT));
+    targets.push(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        DEFAULT_PORT,
+    ));
 
     let peers: Vec<(String, SocketAddr, String)> = stream::iter(targets)
         .map(|addr| async move {

@@ -3,12 +3,12 @@
 //!
 //! All functions are purely synchronous CPU work — no async needed here.
 
+use chacha20poly1305::aead::rand_core::RngCore;
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
     aead::{AeadInPlace, KeyInit, OsRng},
 };
 use ring::hkdf;
-use chacha20poly1305::aead::rand_core::RngCore;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::EngineError;
@@ -140,7 +140,7 @@ mod tests {
         let key3 = derive_key(sec3, &pub4, Some("apple-bravo-charlie")).unwrap();
         let key4 = derive_key(sec4, &pub3, Some("apple-bravo-delta")).unwrap();
         assert_ne!(key3, key4);
-        
+
         // No phrase (default salt)
         let (sec5, pub5) = generate_keypair();
         let (sec6, pub6) = generate_keypair();

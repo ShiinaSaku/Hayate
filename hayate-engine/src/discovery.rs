@@ -1,10 +1,6 @@
 //! Discovery over UDP multicast/broadcast using compio.
 
-use std::{
-    io,
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{io, net::SocketAddr, time::Duration};
 
 use sha2::{Digest, Sha256};
 
@@ -21,7 +17,12 @@ pub fn derive_channel_id(phrase: &str) -> String {
 pub async fn start_broadcaster(channel_id: String, port: u16) -> Result<(), io::Error> {
     let socket = compio::net::UdpSocket::bind("0.0.0.0:0").await?;
     socket.set_broadcast(true)?;
-    let msg = format!("HAYATE_PEER:{}:{}:{}", channel_id, std::env::consts::OS, port);
+    let msg = format!(
+        "HAYATE_PEER:{}:{}:{}",
+        channel_id,
+        std::env::consts::OS,
+        port
+    );
     let target: SocketAddr = "255.255.255.255:50002".parse().unwrap();
     let loopback: SocketAddr = "127.0.0.1:50002".parse().unwrap();
 

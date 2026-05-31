@@ -11,69 +11,96 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runs_on || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: hayate-darwin-amd64
-            goos: darwin
-            goarch: amd64
-            output: hayate-darwin-amd64
+            target: x86_64-apple-darwin
+            runs_on: macos-latest
+            output: hayate
+            rename_to: hayate-darwin-amd64
           - name: hayate-darwin-arm64
-            goos: darwin
-            goarch: arm64
-            output: hayate-darwin-arm64
+            target: aarch64-apple-darwin
+            runs_on: macos-latest
+            output: hayate
+            rename_to: hayate-darwin-arm64
           - name: hayate-linux-amd64
-            goos: linux
-            goarch: amd64
-            output: hayate-linux-amd64
+            target: x86_64-unknown-linux-gnu
+            output: hayate
+            rename_to: hayate-linux-amd64
           - name: hayate-linux-arm64
-            goos: linux
-            goarch: arm64
-            output: hayate-linux-arm64
-          - name: hayate-termux-arm64
-            goos: linux
-            goarch: arm64
-            output: hayate-termux-arm64
+            target: aarch64-unknown-linux-gnu
+            output: hayate
+            rename_to: hayate-linux-arm64
           - name: hayate-windows-amd64
-            goos: windows
-            goarch: amd64
-            output: hayate-windows-amd64.exe
-          - name: hayate-windows-arm64
-            goos: windows
-            goarch: arm64
-            output: hayate-windows-arm64.exe
+            target: x86_64-pc-windows-msvc
+            runs_on: windows-latest
+            output: hayate.exe
+            rename_to: hayate-windows-amd64.exe
+          - name: hayate-termux-arm64
+            target: aarch64-linux-android
+            output: hayate
+            rename_to: hayate-termux-arm64
+            is_android: true
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version-file: go.mod
-          cache: true
+          targets: ${{ matrix.target }}
 
-      - name: Build
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cross-compilers (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Set up NDK (Android)
+        if: matrix.is_android
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+
+      - name: Build Binary
+        shell: bash
         env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          # Target configuration for Linux ARM64
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          # Target configuration for Android ARM64
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: aarch64-linux-android24-clang
+          CC_aarch64_linux_android: aarch64-linux-android24-clang
+          AR_aarch64_linux_android: llvm-ar
+        run: |
+          if [ "${{ matrix.is_android }}" = "true" ]; then
+            # Add NDK toolchain bin to PATH
+            export PATH="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          fi
+          cargo build --target ${{ matrix.target }} --release --bin hayate
+
+      - name: Package Binary
+        shell: bash
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o "dist/${{ matrix.output }}" ./cmd/hayate
-
-      - name: Checksums
-        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.output }} dist/${{ matrix.rename_to }}
           cd dist
-          sha256sum "${{ matrix.output }}" > "${{ matrix.output }}.sha256"
+          sha256sum "${{ matrix.rename_to }}" > "${{ matrix.rename_to }}.sha256" || certutil -hashfile "${{ matrix.rename_to }}" SHA256 > "${{ matrix.rename_to }}.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: |
-            dist/${{ matrix.output }}
-            dist/${{ matrix.output }}.sha256
+            dist/${{ matrix.rename_to }}
+            dist/${{ matrix.rename_to }}.sha256
           if-no-files-found: error

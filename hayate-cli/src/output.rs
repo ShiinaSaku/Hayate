@@ -15,28 +15,22 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 // ---------------------------------------------------------------------------
 
 pub fn print_banner() {
-    // Stacked diagonal HAYATE banner with taglines on the right.
-    let lines = [
-        ("HAYATE", "Swift Cross-Device File Transfer"),
-        ("HAYATE", "Encrypted, Compressed, Secure LAN Streams"),
-        ("HAYATE", ""),
-        (
-            "HAYATE",
-            &format!("v{VERSION}  https://github.com/ShiinaSaku/Hayate"),
-        ),
-        ("HAYATE", ""),
-    ];
-    for (i, (name, tag)) in lines.iter().enumerate() {
-        let indent = "  ".repeat(i);
-        let col_name = style(format!("{indent}{name}")).bold().cyan();
-        if tag.is_empty() {
-            println!("{col_name}");
-        } else {
-            println!("{col_name:<40}{}", style(tag).dim());
-        }
-    }
-    println!();
+    let logo = r#"
+    __  __ ___ __  __  ___  _____ ___ 
+   / / / // _ \\ \/ / / _ \ |_   _|| __|
+  / /_/ // ___ \\  / / ___ \  | |  | _| 
+ /_/\_/_/_/   \_//_/ /_/   \_\|_|  |___|
+"#;
+    println!("{}", style(logo).bold().cyan());
+    println!(
+        "   {} {} {}",
+        style("Swift File Transfer").bold(),
+        style("|").dim(),
+        style(format!("v{VERSION}")).cyan()
+    );
+    println!("   {}\n", style("Secure, Encrypted, & Compressed").dim());
 }
+
 
 // ---------------------------------------------------------------------------
 // Status lines

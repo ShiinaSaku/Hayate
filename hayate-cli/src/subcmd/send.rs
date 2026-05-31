@@ -182,7 +182,9 @@ async fn handshake_sender_split(
     passphrase: Option<&str>,
 ) -> Result<[u8; 32]> {
     // 1. Version
-    let compio::BufResult(result, _) = send.write_all(PROTOCOL_VERSION.to_be_bytes().to_vec()).await;
+    let compio::BufResult(result, _) = send
+        .write_all(PROTOCOL_VERSION.to_be_bytes().to_vec())
+        .await;
     result.map_err(EngineError::Io)?;
 
     // 2. Key exchange
@@ -198,7 +200,9 @@ async fn handshake_sender_split(
 
     // 3. Encrypted metadata
     let enc = crypto::encrypt_metadata(&key, &meta.encode())?;
-    let compio::BufResult(result, _) = send.write_all((enc.len() as u32).to_be_bytes().to_vec()).await;
+    let compio::BufResult(result, _) = send
+        .write_all((enc.len() as u32).to_be_bytes().to_vec())
+        .await;
     result.map_err(EngineError::Io)?;
     let compio::BufResult(result, _) = send.write_all(enc).await;
     result.map_err(EngineError::Io)?;
@@ -257,12 +261,5 @@ async fn send_directory(
     });
 
     let source = hayate_engine::transfer::PayloadSource::Channel(rx);
-    Ok(transfer::send_payload_write(
-        key,
-        source,
-        stream,
-        compress,
-        progress_cb,
-    )
-    .await?)
+    Ok(transfer::send_payload_write(key, source, stream, compress, progress_cb).await?)
 }

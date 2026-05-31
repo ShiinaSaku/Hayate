@@ -8,12 +8,9 @@
 //! return type is `BufResult<T, B>` = `(Result<T, io::Error>, B)` where `B`
 //! is the buffer returned after the kernel is done with it.
 
-use std::{
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
-use compio::io::{AsyncReadExt, AsyncWriteExt, AsyncReadAt, AsyncWriteAtExt};
+use compio::io::{AsyncReadAt, AsyncReadExt, AsyncWriteAtExt, AsyncWriteExt};
 
 use crate::{
     EngineError, crypto,
@@ -322,7 +319,9 @@ where
     };
 
     let mut sink = if transfer_type == TRANSFER_FILE {
-        let f = compio::fs::File::create(output_path).await.map_err(EngineError::Io)?;
+        let f = compio::fs::File::create(output_path)
+            .await
+            .map_err(EngineError::Io)?;
         PayloadSink::File { file: f, pos: 0 }
     } else {
         PayloadSink::Channel(tx)
@@ -399,9 +398,9 @@ where
         if let PayloadSink::Channel(tx) = sink {
             drop(tx);
         }
-        handle.join().map_err(|_| {
-            EngineError::Io(io::Error::other("extractor panicked"))
-        })??;
+        handle
+            .join()
+            .map_err(|_| EngineError::Io(io::Error::other("extractor panicked")))??;
     }
 
     Ok(hex::encode(hasher.finalize()))

@@ -1,4 +1,4 @@
-name: CI
+name: Rust CI
 
 on:
   push:
@@ -16,29 +16,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  format:
-    name: Format
+  fmt:
+    name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version-file: go.mod
-          cache: true
+          components: rustfmt
 
-      - name: Check gofmt
-        run: |
-          files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "$files"
-            exit 1
-          fi
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
 
-      - name: Check modules
-        run: go mod tidy -diff
+  clippy:
+    name: Clippy Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -51,33 +60,14 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Download modules
-        run: go mod download
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Test
-        run: go test ./...
-
-  race:
-    name: Race
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Race test
-        run: go test -race ./...
+      - name: Run Tests
+        run: cargo test --workspace --all-targets
