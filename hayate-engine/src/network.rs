@@ -41,10 +41,11 @@ pub fn generate_self_signed() -> Result<
 /// Builds a `ServerConfig` for the receiver endpoint.
 pub fn server_config() -> Result<ServerConfig, EngineError> {
     let (certs, key) = generate_self_signed()?;
-    let tls = rustls::ServerConfig::builder()
+    let mut tls = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| EngineError::Handshake(e.to_string()))?;
+    tls.alpn_protocols = vec![b"hayate".to_vec()];
     let quic_server = compio_quic::crypto::rustls::QuicServerConfig::try_from(tls)
         .map_err(|e| EngineError::Handshake(e.to_string()))?;
     let mut server_cfg = ServerConfig::with_crypto(Arc::new(quic_server));
@@ -55,14 +56,16 @@ pub fn server_config() -> Result<ServerConfig, EngineError> {
 
 /// Builds a `ClientConfig` that accepts any server certificate.
 pub fn client_config() -> Result<ClientConfig, EngineError> {
-    let tls = rustls::ClientConfig::builder()
+    let mut tls = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SkipCertVerification))
         .with_no_client_auth();
+    tls.alpn_protocols = vec![b"hayate".to_vec()];
     let quic_client = compio_quic::crypto::rustls::QuicClientConfig::try_from(tls)
         .map_err(|e| EngineError::Handshake(e.to_string()))?;
     Ok(ClientConfig::new(Arc::new(quic_client)))
 }
+
 
 /// Creates a QUIC listener endpoint bound to `addr`.
 pub async fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
