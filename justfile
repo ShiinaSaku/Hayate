@@ -34,3 +34,6 @@ discover timeout="5":
 
 clean:
     cargo clean
+
+changelog:
+    ./scripts/generate-changelog.sh

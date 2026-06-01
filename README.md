@@ -225,6 +225,12 @@ Hayate stands on the shoulders of giants. Special thanks to the authors and main
 
 ---
 
+## ✦ Changelog
+
+See [CHANGELOG.md](file:///Users/saksham/Projects/Hayate/CHANGELOG.md) for a list of notable changes in each version.
+
+---
+
 ## ✦ License
 
 MIT. See [LICENSE](LICENSE) for details.
