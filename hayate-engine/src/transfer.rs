@@ -228,18 +228,20 @@ where
         total += chunk.len() as u64;
 
         let plain_frame: Vec<u8> = if compress {
-            let compressed = zstd::encode_all(chunk.as_slice(), 1)
-                .map_err(|e| EngineError::Compression(e.to_string()))?;
-            if compressed.len() < chunk.len() {
-                let mut pf = Vec::with_capacity(1 + compressed.len());
-                pf.push(FRAME_ZSTD);
-                pf.extend_from_slice(&compressed);
-                pf
-            } else {
-                let mut pf = Vec::with_capacity(1 + chunk.len());
-                pf.push(FRAME_RAW);
-                pf.extend_from_slice(&chunk);
-                pf
+            match zstd::encode_all(chunk.as_slice(), 1) {
+                Ok(compressed) if compressed.len() < chunk.len() => {
+                    let mut pf = Vec::with_capacity(1 + compressed.len());
+                    pf.push(FRAME_ZSTD);
+                    pf.extend_from_slice(&compressed);
+                    pf
+                }
+                // Compression didn't help or failed — fall back to raw.
+                _ => {
+                    let mut pf = Vec::with_capacity(1 + chunk.len());
+                    pf.push(FRAME_RAW);
+                    pf.extend_from_slice(&chunk);
+                    pf
+                }
             }
         } else {
             let mut pf = Vec::with_capacity(1 + chunk.len());
@@ -374,14 +376,15 @@ where
         hasher.update(&plaintext);
         total += plaintext.len() as u64;
 
+        let plaintext_len = plaintext.len() as u64;
         match &mut sink {
             PayloadSink::File { file, pos } => {
-                let compio::BufResult(result, _) = file.write_all_at(plaintext.clone(), *pos).await;
+                let compio::BufResult(result, _) = file.write_all_at(plaintext, *pos).await;
                 result.map_err(EngineError::Io)?;
-                *pos += plaintext.len() as u64;
+                *pos += plaintext_len;
             }
             PayloadSink::Channel(tx) => {
-                tx.send_async(plaintext.clone()).await.map_err(|_| {
+                tx.send_async(plaintext).await.map_err(|_| {
                     EngineError::Io(io::Error::new(
                         io::ErrorKind::BrokenPipe,
                         "extractor thread exited",
@@ -400,7 +403,16 @@ where
         }
         handle
             .join()
-            .map_err(|_| EngineError::Io(io::Error::other("extractor panicked")))??;
+            .map_err(|e| {
+                let msg = if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = e.downcast_ref::<&str>() {
+                    (*s).to_owned()
+                } else {
+                    "unknown panic".to_owned()
+                };
+                EngineError::Io(io::Error::other(format!("extractor panicked: {msg}")))
+            })??;
     }
 
     Ok(hex::encode(hasher.finalize()))

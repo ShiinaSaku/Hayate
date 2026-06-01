@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml/badge.svg)](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml)
 [![Builds](https://github.com/ShiinaSaku/Hayate/actions/workflows/builds.yml/badge.svg)](https://github.com/ShiinaSaku/Hayate/actions/workflows/builds.yml)
-[![Go](https://img.shields.io/github/go-mod/go-version/ShiinaSaku/Hayate?logo=go)](go.mod)
+[![Rust](https://img.shields.io/badge/rust-1.96%2B-orange?logo=rust)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ShiinaSaku/Hayate?include_prereleases&sort=semver)](https://github.com/ShiinaSaku/Hayate/releases)
 
@@ -16,7 +16,9 @@ Fast encrypted file transfer for local networks, terminals, scripts, and Termux.
            /___/
 ```
 
-Hayate is a single-binary Go CLI for sending files between machines over QUIC. It uses ephemeral X25519 key exchange, ChaCha20-Poly1305 authenticated encryption, adaptive zstd compression, LAN discovery, IPv4/IPv6 direct mode, and a terminal UI that falls back cleanly for scripts and mobile terminals.
+Hayate is a Rust CLI for sending files between machines over QUIC. It uses ephemeral X25519 key exchange, ChaCha20-Poly1305 authenticated encryption, adaptive zstd compression, LAN discovery, IPv4/IPv6 direct mode, and a terminal UI that falls back cleanly for scripts and mobile terminals.
+
+Built on [compio](https://github.com/compio-rs/compio) (completion-based async I/O: io_uring on Linux, IOCP on Windows, kqueue on macOS) and [quinn-proto](https://github.com/quinn-rs/quinn) for the QUIC state machine.
 
 Current project version: **v2.0.0**.
 
@@ -168,9 +170,8 @@ chmod +x hayate-termux-arm64
 
 Requirements:
 
-- Go version from [go.mod](go.mod).
+- Rust toolchain (edition 2024, MSRV 1.96).
 - `just` is optional, but recommended for local development.
-- `zip` is optional; `tar.gz` archives are always produced by the release script.
 
 Common tasks:
 
@@ -180,47 +181,23 @@ just build
 just run version
 just receive 50001 .
 just send ./file.bin 192.168.1.50:50001
-just release
 ```
 
 Without `just`:
 
 ```bash
-gofmt -w .
-go mod tidy
-go test ./...
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o hayate ./cmd/hayate
-```
-
-Run race tests where supported:
-
-```bash
-go test -race ./...
+cargo fmt -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --release -p hayate-cli
 ```
 
 ## CI
 
 GitHub Actions run:
 
-- `ci.yml`: gofmt check, module tidy check, tests on Linux/macOS/Windows, and race tests on Linux.
+- `ci.yml`: format check, clippy, tests on Linux/macOS/Windows.
 - `builds.yml`: cross-platform static binaries and SHA-256 artifacts for macOS, Linux, Termux, and Windows.
-
-Release artifacts can also be built locally:
-
-```bash
-scripts/release.sh
-HAYATE_RELEASE_RACE=1 scripts/release.sh
-```
-
-Artifacts are written to:
-
-```text
-dist/hayate-v2.0.0/
-dist/hayate-v2.0.0.tar.gz
-dist/hayate-v2.0.0.tar.gz.sha256
-dist/hayate-v2.0.0.zip
-dist/hayate-v2.0.0.zip.sha256
-```
 
 ## Release Targets
 
@@ -248,7 +225,6 @@ Before opening a pull request:
 
 ```bash
 just check
-go test -race ./...
 ```
 
 Report security issues privately until a fix is available.
