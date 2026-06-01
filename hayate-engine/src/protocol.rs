@@ -40,8 +40,8 @@ pub const MAX_FILENAME_BYTES: usize = 4096;
 /// Maximum encrypted metadata payload size (sanity cap).
 pub const MAX_METADATA_ENCRYPTED: usize = 4 + MAX_FILENAME_BYTES + 8 + 1 + 12 + 16 + 16;
 
-/// Chunk size for each data frame in bytes (2 MiB — optimal for LAN and mobile).
-pub const CHUNK_SIZE: usize = 2 * 1024 * 1024;
+/// Chunk size for each data frame in bytes (4 MiB — optimal for LAN and mobile).
+pub const CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Metadata that travels in the encrypted handshake.
 #[derive(Debug, Clone)]

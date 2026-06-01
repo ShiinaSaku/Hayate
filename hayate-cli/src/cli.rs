@@ -2,7 +2,16 @@
 
 use std::{net::IpAddr, path::PathBuf};
 
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{Parser, Subcommand};
+
+pub fn cli_styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+        .placeholder(AnsiColor::Yellow.on_default())
+}
 
 /// Hayate — encrypted, compressed, blazing-fast LAN file transfer.
 #[derive(Parser, Debug)]
@@ -12,6 +21,7 @@ use clap::{Parser, Subcommand};
     about = "Swift cross-device file transfer",
     long_about = None,
     disable_help_subcommand = false,
+    styles = cli_styles(),
 )]
 pub struct Cli {
     #[command(subcommand)]

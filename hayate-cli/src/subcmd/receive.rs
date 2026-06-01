@@ -58,6 +58,7 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
         transfer::send_consent_write(&mut send_stream, accept).await?;
         if !accept {
             output::warn("Transfer rejected.");
+            conn.close(0u32.into(), b"rejected");
             return Ok(());
         }
 
@@ -71,13 +72,14 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
             Some(output::progress_bar(meta.total_size))
         };
 
+        let pb_clone = pb.clone();
         let checksum = transfer::receive_payload_split(
             &key,
             &mut recv_stream,
             &dest,
             meta.transfer_type,
-            |bytes| {
-                if let Some(pb) = &pb {
+            move |bytes| {
+                if let Some(pb) = &pb_clone {
                     pb.set_position(bytes);
                 }
             },
@@ -90,6 +92,7 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
 
         let elapsed = start.elapsed().as_secs_f64();
         output::print_transfer_summary(&meta.filename, meta.total_size, elapsed, &checksum, false);
+        conn.close(0u32.into(), b"complete");
         return Ok(());
     }
 
@@ -142,6 +145,7 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
         transfer::send_consent_write(&mut send_stream, accept).await?;
         if !accept {
             output::warn("Transfer rejected.");
+            conn.close(0u32.into(), b"rejected");
             continue;
         }
 
@@ -156,13 +160,14 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
             Some(output::progress_bar(meta.total_size))
         };
 
+        let pb_clone = pb.clone();
         let checksum = transfer::receive_payload_split(
             &key,
             &mut recv_stream,
             &dest,
             meta.transfer_type,
-            |bytes| {
-                if let Some(pb) = &pb {
+            move |bytes| {
+                if let Some(pb) = &pb_clone {
                     pb.set_position(bytes);
                 }
             },
@@ -175,6 +180,7 @@ pub async fn run(args: ReceiveArgs) -> Result<()> {
 
         let elapsed = start.elapsed().as_secs_f64();
         output::print_transfer_summary(&meta.filename, meta.total_size, elapsed, &checksum, false);
+        conn.close(0u32.into(), b"complete");
     }
 
     Ok(())

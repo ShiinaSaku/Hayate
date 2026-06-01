@@ -105,6 +105,36 @@ pub fn decrypt_frame(key: &[u8; 32], frame: &[u8]) -> Result<Vec<u8>, EngineErro
     Ok(plaintext)
 }
 
+/// Decrypts a frame produced by `encrypt_frame` into a reused buffer.
+/// Input: nonce (12 bytes) + ciphertext + tag (16 bytes).
+/// Writes the decrypted plaintext to `out`.
+pub fn decrypt_frame_into(
+    key: &[u8; 32],
+    frame: &[u8],
+    out: &mut Vec<u8>,
+) -> Result<(), EngineError> {
+    if frame.len() < NONCE_LEN + TAG_LEN {
+        return Err(EngineError::Crypto("frame too short".into()));
+    }
+    let (nonce_bytes, rest) = frame.split_at(NONCE_LEN);
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let ciphertext_len = rest.len() - TAG_LEN;
+    let (ciphertext, tag_bytes) = rest.split_at(ciphertext_len);
+
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    out.clear();
+    out.extend_from_slice(ciphertext);
+    cipher
+        .decrypt_in_place_detached(
+            nonce,
+            b"",
+            out,
+            chacha20poly1305::Tag::from_slice(tag_bytes),
+        )
+        .map_err(|_| EngineError::Crypto("AEAD decrypt failed".into()))?;
+    Ok(())
+}
+
 /// Encrypts a small metadata blob with a freshly-derived nonce.
 /// Same layout as `encrypt_frame`.
 pub fn encrypt_metadata(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, EngineError> {

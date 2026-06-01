@@ -228,7 +228,8 @@ async fn send_file(
 ) -> Result<String> {
     let file = compio::fs::File::open(path).await?;
     let source = hayate_engine::transfer::PayloadSource::File { file, pos: 0 };
-    Ok(transfer::send_payload_write(key, source, stream, compress, progress_cb).await?)
+    let filename = path.file_name().and_then(|s| s.to_str());
+    Ok(transfer::send_payload_write(key, source, stream, compress, filename, progress_cb).await?)
 }
 
 async fn send_directory(
@@ -263,5 +264,5 @@ async fn send_directory(
     });
 
     let source = hayate_engine::transfer::PayloadSource::Channel(rx);
-    Ok(transfer::send_payload_write(key, source, stream, compress, progress_cb).await?)
+    Ok(transfer::send_payload_write(key, source, stream, compress, None, progress_cb).await?)
 }

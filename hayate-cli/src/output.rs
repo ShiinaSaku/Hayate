@@ -80,12 +80,13 @@ pub fn err(msg: &str) {
 /// Creates a download/upload progress bar.
 pub fn progress_bar(total_bytes: u64) -> ProgressBar {
     let style = ProgressStyle::with_template(
-        "   {spinner:.cyan} [{bar:40.cyan/white}] {bytes:>10} / {total_bytes:<10}  {bytes_per_sec:>12}  {eta}",
+        "   {spinner:.green} [{elapsed_precise}] ▕{bar:40.cyan/blue}▏ {bytes}/{total_bytes} ({percent}%) {bytes_per_sec} {eta}",
     )
     .expect("valid template")
-    .progress_chars("##-");
+    .progress_chars("█▉▊▋▌▍▎▏  ");
     let pb = ProgressBar::new(total_bytes);
     pb.set_style(style);
+    pb.enable_steady_tick(std::time::Duration::from_millis(80));
     pb
 }
 

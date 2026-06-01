@@ -3,10 +3,14 @@ $ErrorActionPreference = "Stop"
 $Repo = "ShiinaSaku/Hayate"
 $BinaryName = "hayate.exe"
 
-Write-Host "`n _     _   _______   __   __   _______   _______   _______  " -ForegroundColor Magenta
-Write-Host " |_____|   |_____|     \_/     |_____|      |      |______  " -ForegroundColor Magenta
-Write-Host " |     |   |     |      |      |     |      |      |______  " -ForegroundColor Magenta
-Write-Host "  Swift Cross-Device File Transfer`n"
+Write-Host "`n  __   __     _____    __  __    _____    _______     _____  " -ForegroundColor Cyan
+Write-Host " /\_\ /_/\   /\___/\ /\  /\  /\ /\___/\ /\_______)\ /\_____\ " -ForegroundColor Cyan
+Write-Host "( ( (_) ) ) / / _ \ \\ \ \/ / // / _ \ \\(___  __\/( (_____/ " -ForegroundColor Cyan
+Write-Host " \ \___/ /  \ \(_)/ / \ \__/ / \ \(_)/ /  / / /     \ \__\   " -ForegroundColor Cyan
+Write-Host " / / _ \ \  / / _ \ \  \__/ /  / / _ \ \ ( ( (      / /__/_  " -ForegroundColor Cyan
+Write-Host "( (_( )_) )( (_( )_) ) / / /  ( (_( )_) ) \ \ \    ( (_____\ " -ForegroundColor Cyan
+Write-Host " \/_/ \_\/  \/_/ \_\/  \/_/    \/_/ \_\/  /_/_/     \/_____/ " -ForegroundColor Cyan
+Write-Host "  Swift File Transfer | Secure, Encrypted, & Compressed`n" -ForegroundColor Green
 
 Write-Host "[*] Detecting Windows environment..." -ForegroundColor DarkGray
 
