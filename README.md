@@ -5,6 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ShiinaSaku/Hayate?include_prereleases&sort=semver)](https://github.com/ShiinaSaku/Hayate/releases)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ShiinaSaku/Hayate?utm_source=badge)
 
 > Encrypted, compressed, blazing-fast cross-device file transfer for local networks, terminals, and Termux.
 

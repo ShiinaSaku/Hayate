@@ -67,3 +67,12 @@ compio = { version = "0.19.0", features = [
   "runtime",
   "time",
 ] }
+divan = { version = "4.7.0", package = "codspeed-divan-compat" }
+
+[[bench]]
+name = "crypto"
+harness = false
+
+[[bench]]
+name = "protocol"
+harness = false
