@@ -22,7 +22,7 @@ path = 'src/main.rs'
 [dependencies]
 
 hayate = { path = "../hayate-engine", version = "2.1.1" }
-compio = { version = "0.19.0", features = [
+compio = { version = "0.19.1", features = [
   'macros',
   'fs',
   'net',
@@ -32,7 +32,7 @@ compio = { version = "0.19.0", features = [
 compio-quic = { version = "0.8.0", default-features = false, features = [
   'ring',
 ] }
-compio-runtime = { version = "0.12.0" }
+compio-runtime = { version = "0.12.2" }
 anyhow = { workspace = true }
 clap = { version = '4', features = ['derive', 'env', 'color'] }
 indicatif = { version = '0.18', features = ['improved_unicode'] }
