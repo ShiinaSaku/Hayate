@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0](https://github.com/ShiinaSaku/Hayate/compare/v2.1.1...v2.2.0) - 2026-06-17
+
+### Added
+
+- add release-plz and codebase improvements
+
+### Other
+
+- bump crate versions ([#9](https://github.com/ShiinaSaku/Hayate/pull/9))
+- Add CodSpeed performance benchmarks and CI workflow ([#5](https://github.com/ShiinaSaku/Hayate/pull/5))
+
 ## [2.0.0] - 2026-06-02
 
 ### Other
