@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0](https://github.com/ShiinaSaku/Hayate/compare/v2.1.1...v3.0.0) - 2026-06-18
+
+### Added
+
+- multithreaded receiver and dynamic hashing
+- add release-plz and codebase improvements
+
+### Changed
+
+- structure,improve speeds and prepare v3
+
+### Other
+
+- bump crate versions ([#9](https://github.com/ShiinaSaku/Hayate/pull/9))
+- Add CodSpeed performance benchmarks and CI workflow ([#5](https://github.com/ShiinaSaku/Hayate/pull/5))
+
 ## [2.0.0] - 2026-06-02
 
 ### Other
