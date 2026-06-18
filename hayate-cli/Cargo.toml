@@ -18,7 +18,7 @@ name = "hayate"
 path = "src/main.rs"
 
 [dependencies]
-hayate = { path = "../hayate-engine", version = "2.1.1" }
+hayate = { path = "../hayate-engine", version = "3.0.0" }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["color", "derive", "env"] }
 compio = { workspace = true }
