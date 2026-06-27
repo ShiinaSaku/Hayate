@@ -4,6 +4,16 @@ All notable changes to Hayate are documented in this file.
 
 ---
 
+## [5.0.0](https://github.com/ShiinaSaku/Hayate/compare/v4.0.0...v5.0.0) - 2026-06-27
+
+### Added
+
+- mDNS discovery, stability fixes, docs overhaul, CI upgrade
+
+### Fixed
+
+- stabilise public API for v5.0.0 release
+
 ## [4.0.0] — 2026-06
 
 ### Added
