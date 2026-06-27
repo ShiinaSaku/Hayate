@@ -7,8 +7,7 @@
 **A blazing-fast, completion-based CLI and engine for secure file and directory transfers across local networks.**
 
 [![CI](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml/badge.svg)](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml)
-[![Builds](https://github.com/ShiinaSaku/Hayate/actions/workflows/builds.yml/badge.svg)](https://github.com/ShiinaSaku/Hayate/actions/workflows/builds.yml)
-[![Rust](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](Cargo.toml)
+[![Rust](https://img.shields.io/badge/rust-1.96%2B-orange?logo=rust)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ShiinaSaku/Hayate?include_prereleases&sort=semver)](https://github.com/ShiinaSaku/Hayate/releases)
 [![Website](https://img.shields.io/badge/website-docs-black)](https://shiinasaku.github.io/Hayate/)
