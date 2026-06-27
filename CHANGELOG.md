@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.0.0](https://github.com/ShiinaSaku/Hayate/compare/v3.0.0...v4.0.0) - 2026-06-27
+
+### Other
+
+- deep engine audit — hot-path optimisations, protocol safety, discovery overhaul
+
 ## [3.0.0](https://github.com/ShiinaSaku/Hayate/compare/v2.1.1...v3.0.0) - 2026-06-18
 
 ### Added
