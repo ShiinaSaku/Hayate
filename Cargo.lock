@@ -1260,7 +1260,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hayate"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "hayate-cli"
-version = "5.0.0"
+version = "5.1.0"
 dependencies = [
  "anyhow",
  "clap",
