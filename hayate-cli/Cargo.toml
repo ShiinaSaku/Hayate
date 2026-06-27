@@ -24,7 +24,7 @@ name = "hayate"
 path = "src/main.rs"
 
 [dependencies]
-hayate = { path = "../hayate", version = "4.0.0" }
+hayate = { path = "../hayate", version = "5.0.0" }
 anyhow = { workspace = true }
 clap = { workspace = true }
 compio = { workspace = true }
