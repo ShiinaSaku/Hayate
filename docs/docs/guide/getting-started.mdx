@@ -1,0 +1,105 @@
+---
+title: Getting Started with Hayate
+description: Learn how to install and run Hayate on macOS, Linux, and Windows using Direct or Pairing transfer modes.
+---
+
+# Getting Started
+
+Welcome to **Hayate**! Hayate is a high-performance command-line utility and Rust library designed for secure, encrypted, and compressed file and directory transfers over local area networks (LAN).
+
+Powered by **QUIC** (via `compio-quic` and `quinn-proto`) and completion-based asynchronous I/O (via the `compio` runtime), Hayate saturates local network bandwidth while protecting your data privacy and integrity.
+
+---
+
+## Installation
+
+You can install Hayate on macOS, Linux, and Windows using our automated installation scripts.
+
+### macOS & Linux
+
+Execute the following shell script to download and install the latest precompiled release binary to `/usr/local/bin`:
+
+```bash
+curl -sSf https://shiinasaku.github.io/Hayate/install.sh | bash
+```
+
+### Windows (PowerShell)
+
+Run this command in an elevated PowerShell session to install Hayate to `$HOME\.hayate\bin` and append it to your user PATH:
+
+```powershell
+irm https://shiinasaku.github.io/Hayate/install.ps1 | iex
+```
+
+---
+
+## Basic Usage
+
+Hayate supports two transfer modes: **Pairing Mode** (auto-discovery) and **Direct Mode** (explicit target pairing).
+
+### 1. Pairing Mode (LAN Auto-Discovery)
+
+Pairing mode is the easiest way to transfer files. It uses UDP broadcast packets to find active peers on the same local subnet without typing IP addresses.
+
+1. **Start the Receiver**:
+   Run the receiver with a pairing code phrase. It will broadcast its presence and wait for the sender to connect:
+   ```bash
+   hayate receive --code "forest-river-mountain"
+   ```
+
+2. **Send the File**:
+   Run the sender with the matching pairing code phrase:
+   ```bash
+   hayate send ./path/to/document.pdf --code "forest-river-mountain"
+   ```
+
+> [!TIP]
+> If you do not specify a pairing code on the sender, Hayate will automatically generate a high-entropy 4-word pairing phrase for you to share.
+
+### 2. Direct Mode (IP:Port)
+
+If you are transferring files across different subnets, or if UDP broadcasting is blocked (e.g. on public VPNs or hotspots), use Direct Mode.
+
+1. **Start the Receiver**:
+   Bind the receiver to a specific port (defaults to `50001`):
+   ```bash
+   hayate receive --port 50001
+   ```
+   The receiver will display its local IP addresses (e.g., `192.168.1.50`).
+
+2. **Send the File**:
+   Specify the exact receiver IP and port:
+   ```bash
+   hayate send ./path/to/archive.tar.gz 192.168.1.50:50001
+   ```
+
+---
+
+## Directory Transfers
+
+To transfer a directory, simply pass the folder path to the sender. Hayate will automatically package it on-the-fly into a tar stream, compress it, encrypt it, and write it to the network.
+
+```bash
+# Sender
+hayate send ./my-project --code "colleague-discussion"
+
+# Receiver
+hayate receive --code "colleague-discussion" --output ./received-projects/
+```
+
+> [!WARNING]
+> Directory extraction has built-in security protections that prevent path traversal attacks by rejecting any files trying to write outside the target output directory (e.g. using absolute paths or parent `..` segments).
+
+---
+
+## Mobile & Termux Support
+
+Because Android OS restricts standard UDP broadcast operations, auto-pairing might not discover peers in Termux. When running on Android via Termux, utilize **Direct Mode**:
+
+```bash
+# On Android Termux (Receiver)
+hayate receive --port 50002
+
+# On Computer (Sender)
+hayate send ./contract.pdf 192.168.1.13:50002
+```

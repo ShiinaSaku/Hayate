@@ -1,0 +1,5 @@
+[
+  { "type": "file", "name": "getting-started", "label": "Getting Started" },
+  { "type": "file", "name": "security-model", "label": "Security Model" },
+  { "type": "file", "name": "advanced-integration", "label": "Advanced Integration" }
+]

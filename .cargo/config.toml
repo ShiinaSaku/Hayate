@@ -1,5 +1,28 @@
 [alias]
+# Code Quality & Diagnostics
 check-all = "check --workspace --all-targets"
 clippy-all = "clippy --workspace --all-targets -- -D warnings"
 test-all = "test --workspace"
 bench-all = "bench --workspace --features benchmarks"
+
+# Native Android Cross-Compilation Commands
+android-aarch64 = "build --target aarch64-linux-android --release"
+android-x86_64 = "build --target x86_64-linux-android --release"
+android-all = "build --target aarch64-linux-android --target x86_64-linux-android --release"
+
+[target.aarch64-linux-android]
+linker = "scripts/aarch64-linux-android-clang"
+
+[target.x86_64-linux-android]
+linker = "scripts/x86_64-linux-android-clang"
+
+[env]
+# aarch64 environment compilers and archiver resolved to absolute paths dynamically
+CC_aarch64_linux_android = { value = "scripts/aarch64-linux-android-clang", relative = true }
+CXX_aarch64_linux_android = { value = "scripts/aarch64-linux-android-clang++", relative = true }
+AR_aarch64_linux_android = { value = "scripts/android-llvm-ar", relative = true }
+
+# x86_64 environment compilers and archiver resolved to absolute paths dynamically
+CC_x86_64_linux_android = { value = "scripts/x86_64-linux-android-clang", relative = true }
+CXX_x86_64_linux_android = { value = "scripts/x86_64-linux-android-clang++", relative = true }
+AR_x86_64_linux_android = { value = "scripts/android-llvm-ar", relative = true }

@@ -1,0 +1,113 @@
+---
+title: Advanced Integration
+description: Learn how to integrate the hayate engine as a library dependency in your own Rust applications using compio.
+---
+
+# Advanced Integration
+
+Hayate is designed as a modular Rust crate. In addition to the CLI application, the `hayate` engine can be embedded directly into other Rust applications needing completion-based QUIC transfers.
+
+---
+
+## Workspace Architecture
+
+The workspace is divided into two crates:
+- [hayate](https://github.com/ShiinaSaku/Hayate/tree/master/hayate): The core transfer engine library.
+- [hayate-cli](https://github.com/ShiinaSaku/Hayate/tree/master/hayate-cli): The command-line utility binary wrapping the engine.
+
+---
+
+## Using `hayate` as a Library
+
+To embed the Hayate transfer engine, add `hayate` and `compio` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+hayate = "4.0"
+compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
+```
+
+### 1. Simple Receiver Example
+
+The `HayateReceiver` builder constructs the listening server node, performs network pairing, and handles secure filesystem writes:
+
+```rust
+use std::net::SocketAddr;
+use hayate::HayateReceiver;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let bind_addr: SocketAddr = "0.0.0.0:50001".parse().unwrap();
+
+    let receiver = HayateReceiver::new()
+        .bind(bind_addr)
+        .code("apple-bravo-charlie".to_owned()); // Enable pairing mode
+
+    // Receive the payload to the local "./downloads" directory
+    let (checksum, output_path) = receiver.receive(
+        "./downloads",
+        |meta| {
+            println!("Incoming transfer: {} ({} bytes)", meta.filename, meta.total_size);
+            true // Return true to accept, false to reject
+        },
+        |bytes_received| {
+            println!("Received {} bytes", bytes_received);
+        }
+    ).await?;
+
+    println!("Saved payload to: {}", output_path.display());
+    println!("Validated hash: {}", checksum);
+    Ok(())
+}
+```
+
+### 2. Simple Sender Example
+
+The `HayateSender` builder configures and initiates the file transmission:
+
+```rust
+use std::net::SocketAddr;
+use hayate::HayateSender;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let target_addr: SocketAddr = "192.168.1.50:50001".parse().unwrap();
+
+    let sender = HayateSender::new()
+        .target(target_addr)
+        .compress(true) // Enable Zstd compression
+        .hash_algo("blake3".to_owned()); // Use Blake3 for integrity checks
+
+    let checksum = sender.send(
+        "./photos.zip",
+        |bytes_sent| {
+            println!("Sent {} bytes", bytes_sent);
+        }
+    ).await?;
+
+    println!("Transfer complete! Validation checksum: {}", checksum);
+    Ok(())
+}
+```
+
+---
+
+## Advanced API Reference
+
+### Buffer Pool Management
+
+To achieve zero-heap-allocations in the hot path, the transfer engine uses the `BufferPool` thread-safe pool defined in `hayate::pool::BufferPool`.
+
+- When sending data:
+  ```rust
+  let pool = BufferPool::new(32, CHUNK_SIZE);
+  let mut buffer = pool.lease().await;
+  // Use the buffer...
+  pool.release(buffer);
+  ```
+- Releasing a buffer automatically zeroes the capacity memory to prevent cryptographic leaks of plaintexts on the host.
+
+### Memory & Task Safety
+
+- **Task Isolation**: Compression and encryption tasks are offloaded from the `compio` event loop thread to a dedicated CPU-bound OS thread pool.
+- **Auto-Cleanup**: The receiver uses a `FileCleanupGuard` RAII structure. If the stream disconnects or validation fails midway, the partially-written files are deleted automatically to avoid polluting the target system.

@@ -20,9 +20,23 @@ check: fmt-check clippy test
 build target="hayate":
     cargo build --release -p hayate-cli
 
-build-android:
+android-aarch64:
     rustup target add aarch64-linux-android
-    cargo ndk -t aarch64-linux-android build --release --bin hayate
+    CC="{{justfile_directory()}}/scripts/aarch64-linux-android-clang" \
+    CXX="{{justfile_directory()}}/scripts/aarch64-linux-android-clang++" \
+    AR="{{justfile_directory()}}/scripts/android-llvm-ar" \
+    CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="{{justfile_directory()}}/scripts/aarch64-linux-android-clang" \
+    cargo build --target aarch64-linux-android --release
+
+android-x86_64:
+    rustup target add x86_64-linux-android
+    CC="{{justfile_directory()}}/scripts/x86_64-linux-android-clang" \
+    CXX="{{justfile_directory()}}/scripts/x86_64-linux-android-clang++" \
+    AR="{{justfile_directory()}}/scripts/android-llvm-ar" \
+    CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="{{justfile_directory()}}/scripts/x86_64-linux-android-clang" \
+    cargo build --target x86_64-linux-android --release
+
+android-all: android-aarch64 android-x86_64
 
 run *args:
     cargo run -p hayate-cli -- {{args}}

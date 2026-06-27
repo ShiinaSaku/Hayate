@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# 1. Use ANDROID_NDK_ROOT or ANDROID_NDK_HOME if defined
+if [ -n "$ANDROID_NDK_ROOT" ] && [ -d "$ANDROID_NDK_ROOT" ]; then
+  NDK_ROOT="$ANDROID_NDK_ROOT"
+elif [ -n "$ANDROID_NDK_HOME" ] && [ -d "$ANDROID_NDK_HOME" ]; then
+  NDK_ROOT="$ANDROID_NDK_HOME"
+else
+  # 2. Search common SDK directories for the NDK
+  POSSIBLE_SDK_DIRS=(
+    "$ANDROID_HOME"
+    "$ANDROID_SDK_ROOT"
+    "$HOME/Library/Android/sdk"
+    "/usr/local/lib/android/sdk"
+    "/opt/android-sdk"
+  )
+  
+  NDK_ROOT=""
+  for sdk in "${POSSIBLE_SDK_DIRS[@]}"; do
+    if [ -n "$sdk" ] && [ -d "$sdk/ndk" ]; then
+      LATEST_NDK=$(ls -d "$sdk/ndk"/*/ 2>/dev/null | sort -V | tail -n1)
+      if [ -n "$LATEST_NDK" ] && [ -d "$LATEST_NDK" ]; then
+        NDK_ROOT="${LATEST_NDK%/}"
+        break
+      fi
+    fi
+  done
+fi
+
+if [ -z "$NDK_ROOT" ] || [ ! -d "$NDK_ROOT" ]; then
+  echo "Error: Android NDK not found. Please set ANDROID_NDK_ROOT." >&2
+  exit 1
+fi
+
+# Detect host OS prebuilt toolchain directory
+HOST_OS="linux-x86_64"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  HOST_OS="darwin-x86_64"
+elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
+  HOST_OS="windows-x86_64"
+fi
+
+CLANG_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_OS/bin/x86_64-linux-android26-clang"
+if [ ! -f "$CLANG_BIN" ]; then
+  # Fallback to find any available versioned compiler script
+  CLANG_BIN=$(find "$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_OS/bin" -name "x86_64-linux-android*-clang" 2>/dev/null | sort -V | tail -n1)
+fi
+
+if [ -z "$CLANG_BIN" ] || [ ! -f "$CLANG_BIN" ]; then
+  # Ultimate fallback to generic LLVM clang
+  CLANG_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_OS/bin/clang"
+fi
+
+exec "$CLANG_BIN" "$@"

@@ -1,0 +1,24 @@
+{
+  "name": "rspress-doc-template",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rspress build",
+    "dev": "rspress dev",
+    "format": "prettier --write .",
+    "preview": "rspress preview"
+  },
+  "dependencies": {
+    "@iconify/react": "^6.0.2",
+    "@rspress/core": "^2.0.15"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "prettier": "^3.8.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

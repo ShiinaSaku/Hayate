@@ -11,6 +11,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ShiinaSaku/Hayate?include_prereleases&sort=semver)](https://github.com/ShiinaSaku/Hayate/releases)
+[![Website](https://img.shields.io/badge/website-docs-black)](https://shiinasaku.github.io/Hayate/)
 
 [Features](#features) • [Quick Start](#quick-start) • [Usage & Commands](#usage--commands) • [Installation](#installation) • [Security Model](#security-model) • [Architecture](#workspace-architecture)
 
@@ -156,13 +157,13 @@ hayate send ./document.pdf 192.168.1.13:50002
 ### macOS & Linux
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/ShiinaSaku/Hayate/refs/heads/master/scripts/install.sh | bash
+curl -sSf https://shiinasaku.github.io/Hayate/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/ShiinaSaku/Hayate/refs/heads/master/scripts/install.ps1 | iex
+irm https://shiinasaku.github.io/Hayate/install.ps1 | iex
 ```
 
 > [!TIP]
