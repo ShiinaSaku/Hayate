@@ -4,6 +4,12 @@ All notable changes to Hayate are documented in this file.
 
 ---
 
+## [5.1.0](https://github.com/ShiinaSaku/Hayate/compare/v5.0.0...v5.1.0) - 2026-06-27
+
+### Added
+
+- format
+
 ## [5.0.0](https://github.com/ShiinaSaku/Hayate/compare/v4.0.0...v5.0.0) - 2026-06-27
 
 ### Added
