@@ -25,7 +25,7 @@ Driven by `compio` (an `io_uring`/IOCP runtime) and `compio-quic`, Hayate achiev
 
 ```toml
 [dependencies]
-hayate = "4.0"
+hayate = "5.1.1"
 compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
 ```
 
