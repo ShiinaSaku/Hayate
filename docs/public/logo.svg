@@ -1,0 +1,14 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Outer Chevron -->
+    <path d="M 25 20 L 65 50 L 25 80" stroke-opacity="0.2" />
+    <!-- Middle Chevron -->
+    <path d="M 40 20 L 80 50 L 40 80" stroke-opacity="0.6" />
+    <!-- Inner Chevron/Lines -->
+    <path d="M 55 20 L 95 50 L 55 80" />
+    <!-- Speed tail lines -->
+    <line x1="10" y1="50" x2="35" y2="50" stroke-width="3" stroke-opacity="0.3" />
+    <line x1="5" y1="35" x2="20" y2="35" stroke-width="2" stroke-opacity="0.15" />
+    <line x1="5" y1="65" x2="20" y2="65" stroke-width="2" stroke-opacity="0.15" />
+  </g>
+</svg>

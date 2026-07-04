@@ -1,4 +1,4 @@
-import { appName, description, siteUrl } from '@/lib/shared';
+import { siteUrl } from '@/lib/shared';
 
 export function GET() {
   return new Response(
