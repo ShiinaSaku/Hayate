@@ -13,15 +13,6 @@ keywords = ["quic", "transfer", "cli", "lan", "utility"]
 categories = ["command-line-utilities", "network-programming"]
 publish = false
 
-[package.metadata.dist]
-dist = true
-
-[package.metadata.wix]
-upgrade-guid = "6DF64A3F-ED31-405A-A678-5515B5E6BDC5"
-path-guid = "31978D25-8C07-41E3-994C-62AE441D1918"
-license = false
-eula = false
-
 [lints]
 workspace = true
 
@@ -30,9 +21,11 @@ name = "hayate"
 path = "src/main.rs"
 
 [dependencies]
-hayate = { path = "../hayate", version = "5.1.1" }
+hayate = { path = "../hayate", version = "6.0.0" }
 anyhow = { workspace = true }
 clap = { workspace = true }
+clap_complete = "4"
+clap_mangen = "0.2"
 compio = { workspace = true }
 compio-quic = { workspace = true }
 console = { workspace = true }

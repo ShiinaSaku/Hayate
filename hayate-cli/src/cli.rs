@@ -66,6 +66,9 @@ pub enum Command {
 
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
+
+    /// Generate man pages for the CLI.
+    Man(ManArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -136,4 +139,11 @@ pub struct CompletionsArgs {
     /// Shell to generate a completion script for.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ManArgs {
+    /// Directory to write generated man pages into.
+    #[arg(default_value = "man")]
+    pub out_dir: std::path::PathBuf,
 }

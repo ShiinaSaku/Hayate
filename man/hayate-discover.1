@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH discover 1  "discover " 
+.SH NAME
+discover \- Scan the local network for active Hayate receivers
+.SH SYNOPSIS
+\fBdiscover\fR [\fB\-t\fR|\fB\-\-timeout\fR] [\fB\-\-cidr\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Scan the local network for active Hayate receivers
+.SH OPTIONS
+.TP
+\fB\-t\fR, \fB\-\-timeout\fR \fI<TIMEOUT>\fR [default: 15]
+Network scan timeout in seconds
+.TP
+\fB\-\-cidr\fR \fI<CIDR>\fR
+Override the subnet CIDR to scan (e.g. 192.168.1.0/24)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
