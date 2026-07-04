@@ -114,7 +114,14 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         let dest = if args.auto_accept {
             Some(resolve_output(&args.output, &meta))
         } else {
-            prompt_accept(&meta, peer, &args.output)?
+            if let Some(pb) = &spinner {
+                output::hide_progress(pb);
+            }
+            let result = prompt_accept(&meta, peer, &args.output);
+            if let Some(pb) = &spinner {
+                output::show_progress(pb);
+            }
+            result?
         };
 
         let accept = dest.is_some();
@@ -307,7 +314,14 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         let dest = if args.auto_accept {
             Some(resolve_output(&args.output, &meta))
         } else {
-            prompt_accept(&meta, peer, &args.output)?
+            if let Some(pb) = &spinner {
+                output::hide_progress(pb);
+            }
+            let result = prompt_accept(&meta, peer, &args.output);
+            if let Some(pb) = &spinner {
+                output::show_progress(pb);
+            }
+            result?
         };
 
         let accept = dest.is_some();
@@ -503,7 +517,7 @@ fn prompt_accept(
     let accept = match inquire::Confirm::new(&prompt).with_default(false).prompt() {
         Ok(val) => val,
         Err(inquire::InquireError::OperationInterrupted) => {
-            std::process::exit(130);
+            return Ok(None);
         }
         Err(e) => return Err(anyhow::anyhow!(e)),
     };
@@ -516,7 +530,7 @@ fn prompt_accept(
         {
             Ok(val) => val,
             Err(inquire::InquireError::OperationInterrupted) => {
-                std::process::exit(130);
+                return Ok(None);
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
         };

@@ -34,6 +34,7 @@ if-addrs = { workspace = true }
 indicatif = { workspace = true }
 inquire = { workspace = true }
 crossterm = { version = "0.29", default-features = false, features = ["events"] }
+libc = "0.2"
 rand = { workspace = true }
 
 [build-dependencies]

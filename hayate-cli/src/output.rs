@@ -35,10 +35,13 @@ thread_local! {
     };
 
     /// Whether stdout is a true terminal (not piped/redirected).
-    static IS_TTY: bool = std::io::stdout().is_terminal();
+    static IS_TTY: bool = std::io::stderr().is_terminal();
 }
 
-/// Returns `true` when stdout is a real terminal (not piped or redirected).
+/// Returns `true` when stderr is a real terminal (not piped or redirected).
+///
+/// Progress bars and spinners draw to stderr so stdout stays free for
+/// structured or pipeable output. We use stderr TTY status as the gate.
 #[inline]
 pub fn is_tty() -> bool {
     IS_TTY.with(|v| *v)
@@ -403,7 +406,7 @@ pub fn transfer_progress_bar(label: &str, total_bytes: u64) -> ProgressBar {
     pb.set_style(style);
     pb.set_prefix(format!("{label:>8}"));
     if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stdout_with_hz(15));
+        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
     } else {
         pb.set_draw_target(ProgressDrawTarget::hidden());
     }
@@ -443,8 +446,8 @@ pub fn spinner(label: &str, detail: &str) -> ProgressBar {
     pb.set_style(style);
     pb.set_prefix(format!("{label}  {detail}"));
     if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stdout_with_hz(10));
-        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
+        pb.enable_steady_tick(std::time::Duration::from_millis(120));
     } else {
         pb.set_draw_target(ProgressDrawTarget::hidden());
     }
@@ -471,12 +474,24 @@ pub fn scan_progress_bar(total_hosts: u64) -> ProgressBar {
     let pb = ProgressBar::new(total_hosts);
     pb.set_style(style);
     if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stdout_with_hz(15));
-        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
+        pb.enable_steady_tick(std::time::Duration::from_millis(120));
     } else {
         pb.set_draw_target(ProgressDrawTarget::hidden());
     }
     pb
+}
+
+/// Temporarily hide a progress bar so an interactive prompt can draw cleanly.
+pub fn hide_progress(pb: &ProgressBar) {
+    pb.set_draw_target(ProgressDrawTarget::hidden());
+}
+
+/// Restore a progress bar to stderr after an interactive prompt finishes.
+pub fn show_progress(pb: &ProgressBar) {
+    if is_tty() {
+        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

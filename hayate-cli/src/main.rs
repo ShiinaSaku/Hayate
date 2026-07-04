@@ -5,6 +5,9 @@ mod output;
 mod subcmd;
 mod words;
 
+mod exit_code;
+
+use std::process::{ExitCode, Termination};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -46,13 +49,23 @@ fn apply_color_override(args: &[String]) {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> impl Termination {
+    match run() {
+        Ok(exit_code) => exit_code,
+        Err(err) => {
+            output::print_error(&err);
+            ExitCode::from(exit_code::CliExitCode::GeneralError)
+        }
+    }
+}
+
+fn run() -> Result<ExitCode> {
     let args: Vec<String> = std::env::args().collect();
     apply_color_override(&args);
 
     if args.iter().any(|arg| arg == "-V") {
         println!("v{}", env!("CARGO_PKG_VERSION"));
-        std::process::exit(0);
+        return Ok(ExitCode::SUCCESS);
     }
     if args.iter().any(|arg| arg == "--version") {
         println!(
@@ -60,7 +73,7 @@ fn main() -> Result<()> {
             env!("CARGO_PKG_VERSION"),
             env!("GIT_COMMIT_HASH")
         );
-        std::process::exit(0);
+        return Ok(ExitCode::SUCCESS);
     }
 
     let cli = match Cli::try_parse() {
@@ -81,7 +94,7 @@ fn main() -> Result<()> {
         output::print_banner();
         Cli::command().print_help()?;
         println!();
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
 
     // Shared cancellation flag for graceful shutdown (Ctrl+C).
@@ -99,15 +112,15 @@ fn main() -> Result<()> {
             cancelled_clone.store(true, Ordering::SeqCst);
             // Small grace period for logs to flush, then force exit.
             compio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            std::process::exit(130);
+            exit_code::CliExitCode::Interrupted.exit();
         })
         .detach();
 
         let res = subcmd::dispatch(cli, cancelled).await;
         if let Err(err) = res {
             output::print_error(&err);
-            std::process::exit(1);
+            return Ok(ExitCode::from(exit_code::CliExitCode::GeneralError));
         }
-        Ok(())
+        Ok(ExitCode::SUCCESS)
     })
 }
