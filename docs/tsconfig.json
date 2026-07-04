@@ -1,28 +1,24 @@
 {
   "compilerOptions": {
-    "lib": ["DOM", "ES2023"],
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    "types": ["vite", "vite/client"],
     "jsx": "react-jsx",
-    "target": "ES2023",
-    "noEmit": true,
-    "skipLibCheck": true,
-    "useDefineForClassFields": true,
-
-    /* modules */
     "module": "ESNext",
-    "moduleDetection": "force",
     "moduleResolution": "bundler",
-    "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-
-    /* type checking */
+    "allowJs": true,
+    "checkJs": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "collections/*": ["./.source/*"]
+    }
   },
-  "include": ["docs", "theme", "rspress.config.ts"],
-  "mdx": {
-    "checkMdx": true
-  }
+  "exclude": ["node_modules", "dist"]
 }

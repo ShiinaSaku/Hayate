@@ -1,28 +1,33 @@
 # Hayate Docs
 
-Documentation site built with [Rspress v2](https://rspress.dev). Source lives in `docs/docs/`, output goes to `docs/doc_build/`.
+A Fumadocs + Waku documentation and landing site for [Hayate](https://github.com/ShiinaSaku/Hayate), the encrypted LAN file transfer tool.
 
-## Quick start
+## Commands
 
-```bash
-pnpm install    # first time only
-pnpm dev        # live preview at http://localhost:5173
-pnpm build      # production build
-pnpm preview    # preview the production build
-```
-
-## Prebuild
-
-Before every build, `scripts/copy-assets.mjs` copies install scripts and the logo from the project root into `docs/public/`. These are served as static files by the site and used by the install instructions on the home page.
-
-## Writing docs
-
-- MDX syntax (Markdown + JSX components)
-- Frontmatter `description` required on every page for SEO and llms.txt generation
-- Navigation is configured in `_nav.json` and per-section `_meta.json`
-
-## Formatting
+Run from the `docs/` directory:
 
 ```bash
-pnpm format
+bun install
+bun run dev          # localhost:8080
+bun run build        # static build into dist/public
+bun run types:check  # fumadocs-mdx + tsc
+bun run lint         # oxlint
 ```
+
+## Features
+
+- **Fumadocs UI** default docs theme with dark/light mode and Orama search.
+- **Takumi OG image generation** for `/og/image.webp` and `/og/docs/**/image.webp`.
+- **LLM-friendly endpoints**: `/llms.txt`, `/llms-full.txt`, and `/docs/*.md` markdown exports.
+- **SEO**: canonical links, Open Graph, Twitter cards, `robots.txt`, and `sitemap.xml`.
+- **Landing page** with hero, features, install cards, and quick-start commands.
+
+## Structure
+
+| Path | Purpose |
+|------|---------|
+| `content/docs/` | MDX documentation content |
+| `src/pages/` | Waku routes (landing, docs, API endpoints) |
+| `src/lib/source.ts` | Fumadocs source loader + OG/markdown helpers |
+| `src/components/` | Shared UI components |
+| `public/` | Static assets (favicon) |

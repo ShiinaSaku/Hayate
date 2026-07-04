@@ -1,0 +1,16 @@
+import { defineConfig } from 'waku/config';
+import mdx from 'fumadocs-mdx/vite';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  vite: {
+    resolve: {
+      tsconfigPaths: true,
+      dedupe: ['waku'],
+    },
+    ssr: {
+      external: ['@takumi-rs/image-response'],
+    },
+    plugins: [tailwindcss(), mdx()],
+  },
+});
