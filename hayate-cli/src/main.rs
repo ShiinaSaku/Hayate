@@ -13,12 +13,43 @@ use clap::{CommandFactory, Parser};
 use cli::Cli;
 use compio::runtime::spawn;
 
-fn main() -> Result<()> {
-    if std::env::var_os("NO_COLOR").is_none() {
-        console::set_colors_enabled(true);
+/// Scans raw args for an explicit `--color <mode>` / `--color=<mode>` override.
+///
+/// Applied before `Cli::try_parse()` so that `always`/`never` take effect even
+/// on the `--help` / parse-error exit path, which prints the banner before a
+/// full [`Cli`] value exists. `auto` (or no flag at all) is a no-op: `console`
+/// already auto-detects `NO_COLOR` / `CLICOLOR` / `CLICOLOR_FORCE` / tty /
+/// `TERM=dumb` correctly on its own — this only needs to handle the two cases
+/// where the user wants to override that detection.
+fn apply_color_override(args: &[String]) {
+    let value = args.iter().enumerate().find_map(|(i, arg)| {
+        arg.strip_prefix("--color=").map(str::to_owned).or_else(|| {
+            (arg == "--color")
+                .then(|| args.get(i + 1).cloned())
+                .flatten()
+        })
+    });
+    match value.as_deref() {
+        Some("always") => {
+            console::set_colors_enabled(true);
+            console::set_colors_enabled_stderr(true);
+            console::set_true_colors_enabled(true);
+            console::set_true_colors_enabled_stderr(true);
+        }
+        Some("never") => {
+            console::set_colors_enabled(false);
+            console::set_colors_enabled_stderr(false);
+        }
+        _ => {
+            // "auto", unrecognized, or unset: leave console's own detection alone.
+        }
     }
+}
 
+fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    apply_color_override(&args);
+
     if args.iter().any(|arg| arg == "-V") {
         println!("v{}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
