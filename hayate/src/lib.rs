@@ -10,10 +10,11 @@
 //! * Completion-based async I/O through `compio`.
 //! * Ephemeral X25519 key agreement.
 //! * HKDF-SHA256 key derivation.
-//! * Blake3, RapidHash, or SHA256 payload integrity.
+//! * Blake3 or SHA256 payload integrity.
 //! * ChaCha20-Poly1305 or AES-256-GCM frame encryption.
 //! * Optional zstd compression.
-//! * Safe tar streaming for directory payloads.
+//! * Safe tar streaming for directory payloads (symlinks rejected; hard links
+//!   supported by replay after the target file is extracted).
 //!
 //! Most applications should start with [`HayateSender`] and [`HayateReceiver`].
 //! Lower-level modules remain public for custom transports, protocol testing,
@@ -131,7 +132,8 @@
 //! * Metadata is encrypted and authenticated before use.
 //! * Unknown transfer types are rejected before receive routing.
 //! * Payload frames are length-capped and AEAD-authenticated before writes.
-//! * Directory extraction rejects absolute paths, `..`, symlinks, and hard links.
+//! * Directory extraction rejects absolute paths, `..`, and symlinks; hard
+//!   links are collected and replayed after their targets are extracted.
 //! * Each transfer uses a fresh random HKDF salt and a transcript-bound key
 //!   derivation. When a passphrase is used, it is mixed into the IKM; this
 //!   authenticates the session against an eavesdropper but is **not a PAKE** on
