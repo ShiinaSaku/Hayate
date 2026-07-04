@@ -262,7 +262,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
                 if !is_peer_close(&e) {
                     output::err(&format!("Connection failed: {e}"));
                 }
-                spinner = respawn_spinner(args.no_progress);
+                respawn_spinner(args.no_progress, &mut spinner);
                 continue;
             }
         };
@@ -275,7 +275,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
                 if !is_peer_close(&e) {
                     output::err(&format!("Failed to accept streams: {e}"));
                 }
-                spinner = respawn_spinner(args.no_progress);
+                respawn_spinner(args.no_progress, &mut spinner);
                 continue;
             }
         };
@@ -291,7 +291,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
             Ok(r) => r,
             Err(e) => {
                 output::err(&format!("Handshake failed: {e}"));
-                spinner = respawn_spinner(args.no_progress);
+                respawn_spinner(args.no_progress, &mut spinner);
                 continue;
             }
         };
@@ -330,13 +330,13 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         }
         if let Err(e) = transfer::send_consent_write(&mut send_stream, accept).await {
             output::err(&format!("Failed to send transfer consent: {e}"));
-            spinner = respawn_spinner(args.no_progress);
+            respawn_spinner(args.no_progress, &mut spinner);
             continue;
         }
         if !accept {
             output::warn("Transfer rejected.");
             conn.close(0u32.into(), b"rejected");
-            spinner = respawn_spinner(args.no_progress);
+            respawn_spinner(args.no_progress, &mut spinner);
             continue;
         }
         let dest = dest.unwrap();
@@ -387,7 +387,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
             Err(e) => {
                 output::err(&format!("Transfer failed: {e}"));
                 conn.close(1u32.into(), b"failed");
-                spinner = respawn_spinner(args.no_progress);
+                respawn_spinner(args.no_progress, &mut spinner);
                 continue;
             }
         };
@@ -427,7 +427,15 @@ fn is_peer_close(e: &QuicConnectionError) -> bool {
 }
 
 /// Re-creates a "Waiting" spinner after handling a failed connection.
-fn respawn_spinner(no_progress: bool) -> Option<indicatif::ProgressBar> {
+/// Any previous spinner is finished and cleared first so only one live
+/// spinner appears at a time.
+fn respawn_spinner(
+    no_progress: bool,
+    current: &mut Option<indicatif::ProgressBar>,
+) -> Option<indicatif::ProgressBar> {
+    if let Some(pb) = current.take() {
+        pb.finish_and_clear();
+    }
     if no_progress {
         None
     } else {
