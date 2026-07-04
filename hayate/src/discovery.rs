@@ -52,7 +52,6 @@ pub struct DiscoveredPeer {
 /// extra crate is needed.
 #[must_use]
 pub fn derive_channel_id(phrase: &str) -> String {
-    // ponytail: ring::digest replaces the sha2 crate — same algorithm, zero extra dep.
     let result = ring::digest::digest(&ring::digest::SHA256, phrase.as_bytes());
     crate::hex_encode(&result.as_ref()[..4])
 }

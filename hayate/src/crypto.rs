@@ -114,9 +114,6 @@ pub fn cipher_algorithm(cipher_id: u8) -> Result<&'static ring::aead::Algorithm,
 /// alive until [`derive_key`] consumes it.
 #[must_use]
 pub fn generate_keypair() -> (EphemeralSecret, [u8; PUBLIC_KEY_LEN]) {
-    // ponytail: rand_core::OsRng is the only way to feed x25519-dalek's
-    // EphemeralSecret — it requires a CryptoRngCore, which ring::rand::SystemRandom
-    // does not implement.
     let secret = EphemeralSecret::random_from_rng(OsRng);
     let public = PublicKey::from(&secret);
     (secret, public.to_bytes())
