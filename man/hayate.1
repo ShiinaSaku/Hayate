@@ -1,23 +1,23 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH hayate 1  "hayate 6.0.0" 
+.TH HAYATE 1 "2026-07-04" "hayate 6.0.0" "Hayate Manual"
 .SH NAME
 hayate \- Swift cross\-device file transfer
 .SH SYNOPSIS
-\fBhayate\fR [\fB\-\-color\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+\fBhayate\fR [\fB\-\-color\fR] [\fB\-h\fR|\fB\-\-help\fR]
+[\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
 .SH DESCRIPTION
 Hayate sends encrypted files and directories directly across a LAN.
 .SH OPTIONS
 .TP
 \fB\-\-color\fR \fI<COLOR>\fR [default: auto]
 Control colored output
-.br
 
-.br
 \fIPossible values:\fR
 .RS 14
 .IP \(bu 2
-auto: Color when stdout is a terminal; honors `NO_COLOR` / `CLICOLOR` / `CLICOLOR_FORCE`
+auto: Color when stdout is a terminal; honors `NO_COLOR` / `CLICOLOR` /
+`CLICOLOR_FORCE`
 .IP \(bu 2
 always: Always emit color, even when redirected to a file or pipe
 .IP \(bu 2
@@ -42,9 +42,6 @@ Scan the local network for active Hayate receivers
 .TP
 hayate\-completions(1)
 Generate shell completion scripts
-.TP
-hayate\-man(1)
-Generate man pages for the CLI
 .TP
 hayate\-help(1)
 Print this message or the help of the given subcommand(s)

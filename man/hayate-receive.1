@@ -1,10 +1,12 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH receive 1  "receive " 
+.TH HAYATE-RECEIVE 1 "2026-07-04" "hayate 6.0.0" "Hayate Manual"
 .SH NAME
 receive \- Start a receiver and wait for an incoming file or directory
 .SH SYNOPSIS
-\fBreceive\fR [\fB\-b\fR|\fB\-\-bind\fR] [\fB\-p\fR|\fB\-\-port\fR] [\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-auto\-accept\fR] [\fB\-\-no\-progress\fR] [\fB\-\-code\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+\fBreceive\fR [\fB\-b\fR|\fB\-\-bind\fR] [\fB\-p\fR|\fB\-\-port\fR]
+[\fB\-o\fR|\fB\-\-output\fR] [\fB\-\-auto\-accept\fR] [\fB\-\-no\-progress\fR]
+[\fB\-\-code\fR] [\fB\-h\fR|\fB\-\-help\fR]
 .SH DESCRIPTION
 Start a receiver and wait for an incoming file or directory
 .SH OPTIONS
@@ -12,13 +14,13 @@ Start a receiver and wait for an incoming file or directory
 \fB\-b\fR, \fB\-\-bind\fR \fI<BIND>\fR [default: 0.0.0.0]
 IP address to bind the QUIC listener
 .RS
-May also be specified with the \fBHAYATE_BIND\fR environment variable. 
+May also be specified with the \fBHAYATE_BIND\fR environment variable.
 .RE
 .TP
 \fB\-p\fR, \fB\-\-port\fR \fI<PORT>\fR [default: 50001]
 Port to listen on
 .RS
-May also be specified with the \fBHAYATE_PORT\fR environment variable. 
+May also be specified with the \fBHAYATE_PORT\fR environment variable.
 .RE
 .TP
 \fB\-o\fR, \fB\-\-output\fR \fI<OUTPUT>\fR [default: .]
