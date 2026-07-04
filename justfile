@@ -13,27 +13,23 @@ clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
 test:
-    cargo test --workspace
+    cargo test --workspace --all-targets
 
 check: fmt-check clippy test
 
 build target="hayate":
     cargo build --release -p hayate-cli
 
-# Build release binary with dist profile (LTO=thin, smaller binary)
-build-dist:
-    cargo build --profile dist -p hayate-cli
-
-# Cross-compile for all supported targets
+# Cross-compile for all desktop targets (requires appropriate linkers/toolchains)
 build-all:
-    cargo build --profile dist --target x86_64-apple-darwin -p hayate-cli
-    cargo build --profile dist --target aarch64-apple-darwin -p hayate-cli
-    cargo build --profile dist --target x86_64-unknown-linux-gnu -p hayate-cli
-    cargo build --profile dist --target x86_64-unknown-linux-musl -p hayate-cli
+    cargo build --release --target x86_64-apple-darwin -p hayate-cli
+    cargo build --release --target aarch64-apple-darwin -p hayate-cli
+    cargo build --release --target x86_64-unknown-linux-gnu -p hayate-cli
+    cargo build --release --target x86_64-unknown-linux-musl -p hayate-cli
 
 # Windows cross-compile (requires mingw or MSVC toolchain)
 build-windows:
-    cargo build --profile dist --target x86_64-pc-windows-msvc -p hayate-cli
+    cargo build --release --target x86_64-pc-windows-msvc -p hayate-cli
 
 android-aarch64:
     rustup target add aarch64-linux-android
@@ -60,31 +56,13 @@ receive port="50001" output=".":
     cargo run -p hayate-cli -- receive --port "{{port}}" --output "{{output}}"
 
 send file peer:
-    cargo run -p hayate-cli -- send "{{file}}" --peer "{{peer}}"
+    cargo run -p hayate-cli -- send "{{file}}" "{{peer}}"
 
 discover timeout="5":
     cargo run -p hayate-cli -- discover --timeout "{{timeout}}"
 
 clean:
     cargo clean
-
-# --- cargo-dist integration ---
-
-# Initialise cargo-dist in the workspace (first-time setup)
-dist-init:
-    cargo dist init
-
-# Build release artefacts with cargo-dist (local simulation)
-dist-build:
-    cargo dist build --local
-
-# Generate CI workflow and installer scripts from dist config
-dist-generate-ci:
-    cargo dist generate-ci
-
-# Build installers locally (shell + powershell scripts)
-dist-installers:
-    cargo dist build --installer=shell --installer=powershell --local
 
 # --- release helpers ---
 
@@ -98,19 +76,3 @@ release-status:
     @echo ""
     @echo "Pending commits since last tag:"
     @git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD)..HEAD 2>/dev/null || echo "  (none)"
-
-# List what dist will build for the current version
-release-plan:
-    dist plan
-
-# --- winget submission ---
-
-# Copy winget manifests to winget-pkgs repo for PR
-winget-submit version="5.0.0" sha_x64="" sha_arm64="":
-    @echo "1. Fork https://github.com/microsoft/winget-pkgs"
-    @echo "2. Update winget/manifests/s/ShiinaSaku/Hayate/{{version}}/ with SHAs:"
-    @echo "   x64:  {{sha_x64}}"
-    @echo "   arm64: {{sha_arm64}}"
-    @echo "3. Copy to winget-pkgs:"
-    @echo "   cp -r winget/manifests/* ../winget-pkgs/manifests/"
-    @echo "4. PR to microsoft/winget-pkgs"

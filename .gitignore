@@ -13,7 +13,9 @@ dist/
 
 # Environment and secrets
 .env
+.env*
 *.pem
+opencode.json
 
 # Editor/IDE
 .idea/
@@ -26,3 +28,4 @@ dist/
 # Generated documentation
 docs/doc_build/
 docs/node_modules/
+RELEASE.md

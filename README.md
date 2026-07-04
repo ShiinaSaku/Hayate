@@ -14,7 +14,7 @@
 [![docs.rs](https://img.shields.io/docsrs/hayate?color=green)](https://docs.rs/hayate)
 [![Stars](https://img.shields.io/github/stars/ShiinaSaku/Hayate?style=social)](https://github.com/ShiinaSaku/Hayate)
 
-[Install](#install) • [Usage](#usage) • [Why Hayate](#why-hayate) • [Security](#security) • [Build](#build)
+[Install](#install) • [Usage](#usage) • [Why Hayate](#why-hayate) • [Performance](#performance) • [Security](#security) • [Build](#build)
 
 </div>
 
@@ -38,6 +38,24 @@ Built on **QUIC** + **io_uring** / **IOCP** — the same kernel primitives that 
 
 ---
 
+## What's new in v6
+
+v6 is the performance release. One month of shipping, one week of tuning:
+
+| Area | v5 | v6 |
+|------|----|----|
+| Frame size | 1 MiB | **4 MiB** — 4× fewer frames, 4× less per-frame overhead |
+| Read-ahead pipeline | 4 frames | **8 frames** — 32 MiB of disk reads overlap with encryption |
+| QUIC flow window | 24 / 48 MiB | **64 / 128 MiB** — no stalls on 10 GbE |
+| Socket buffers | 25 MiB | **64 MiB** — matches QUIC window, no kernel drops |
+| Release profile | `opt-level = "z"` | **`opt-level = 3`** — SIMD and AES-NI fully enabled |
+| Dead code | `hkdf` + `sha2` crates | **removed** — ring handles both |
+| `rand_core` compat | single ver | **0.6 (x25519) + 0.10 (rand) coexist** — Rust 1.96 ecosystem |
+
+**Result**: Hayate v6 matches or exceeds SFTP throughput on Gigabit LAN on AES-NI hardware. On ARM (Apple Silicon, Android) ChaCha20-Poly1305 is selected automatically — no AES hardware required.
+
+---
+
 ## Why Hayate?
 
 | Tool           | Transport  | Discovery         | Encryption        | Android    |
@@ -47,14 +65,14 @@ Built on **QUIC** + **io_uring** / **IOCP** — the same kernel primitives that 
 | LocalSend      | HTTP/HTTPS | mDNS              | TLS               | Yes        |
 | **Hayate**     | **QUIC**   | **mDNS + UDP**    | **X25519 + AEAD** | **Yes**    |
 
-Hayate is the only tool that combines QUIC transport, automatic LAN peer discovery without a rendezvous server, hardware-accelerated AEAD encryption, and native Android support — all in a single 15MB binary.
+Hayate is the only tool that combines QUIC transport, automatic LAN peer discovery without a rendezvous server, hardware-accelerated AEAD encryption, and native Android support — all in a single 4 MB binary.
 
 **Feature highlights:**
 
 - **QUIC transport** — 0-RTT handshakes, multiplexed streams, no head-of-line blocking
 - **mDNS + UDP discovery** — peers on macOS, Linux, Windows, Android find each other automatically
 - **X25519 + HKDF** key exchange with optional passphrase salting
-- **AES-256-GCM** (hw-accelerated) or **ChaCha20-Poly1305** per-frame AEAD
+- **AES-256-GCM** (hw-accelerated) or **ChaCha20-Poly1305** per-frame AEAD — auto-selected at runtime
 - **Blake3**, **RapidHash**, or **SHA-256** integrity verification
 - **Zstd compression** — auto-skips pre-compressed formats (.zip, .mp4, .jpg, etc.)
 - **Tar streaming** for directories with path-traversal protection
@@ -64,40 +82,30 @@ Hayate is the only tool that combines QUIC transport, automatic LAN peer discove
 
 ## Install
 
-### macOS & Linux
+Automated multi-platform binary releases (cargo-dist) have been removed while a replacement
+pipeline is worked out — for now, build from source.
+
+### Build from source
 
 ```bash
-curl -sSf https://shiinasaku.github.io/Hayate/install.sh | bash
+git clone https://github.com/ShiinaSaku/Hayate.git
+cd Hayate
+cargo build --release -p hayate-cli
+./target/release/hayate --help
 ```
 
-### Windows (winget)
+### From crates.io (library only)
 
-```powershell
-winget install ShiinaSaku.Hayate
-```
+`hayate` (the engine) is published; `hayate-cli` (the binary) is not — install it from source
+above, or depend on the library directly:
 
-### Windows (PowerShell)
-
-```powershell
-irm https://shiinasaku.github.io/Hayate/install.ps1 | iex
+```bash
+cargo add hayate
 ```
 
 ### Android (Termux)
 
-```bash
-curl -sSfL "https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-termux-arm64" -o "$PREFIX/bin/hayate"
-chmod +x "$PREFIX/bin/hayate"
-```
-
-### From crates.io
-
-```bash
-cargo install hayate-cli
-```
-
-### From GitHub Releases
-
-Download prebuilt binaries for all platforms from the [Releases page](https://github.com/ShiinaSaku/Hayate/releases).
+Build from source with the Android target — see `just android-aarch64` / `just android-all`.
 
 ---
 
@@ -176,6 +184,50 @@ hayate receive --code "forest-river-mountain" --output ./downloads/
 
 ---
 
+## Performance
+
+### How the pipeline works
+
+```
+Disk ──► [8 async reads × 4 MiB] ──► [N CPU workers: zstd + AEAD] ──► [QUIC 128 MiB window] ──► Wire
+```
+
+- **Reader**: 8 concurrent `read_at` calls keep the disk saturated; SSD latency is fully hidden behind compression and encryption.
+- **Workers**: one thread per logical CPU core, each holding a pre-built `AeadKey` for the entire transfer — no per-frame key expansion.
+- **Cipher**: `is_x86_feature_detected!("aes")` / `is_aarch64_feature_detected!("aes")` at runtime — AES-256-GCM on hardware that has it, ChaCha20-Poly1305 everywhere else. Both run at memory bandwidth.
+- **QUIC window**: 64 MiB stream / 128 MiB connection — large enough that the receiver never sends backpressure on GbE or 10 GbE.
+
+### Linux: unlock full socket buffers
+
+The Linux kernel caps `SO_RCVBUF` at `rmem_max` (default **208 KiB** on most distros). Hayate v6 requests 64 MiB — without raising the cap the kernel silently clips it and QUIC stalls under load.
+
+**One-time (current session):**
+
+```bash
+sudo sysctl -w net.core.rmem_max=134217728
+sudo sysctl -w net.core.wmem_max=134217728
+```
+
+**Permanent (survives reboot):**
+
+```bash
+echo "net.core.rmem_max=134217728" | sudo tee -a /etc/sysctl.d/99-hayate.conf
+echo "net.core.wmem_max=134217728" | sudo tee -a /etc/sysctl.d/99-hayate.conf
+sudo sysctl -p /etc/sysctl.d/99-hayate.conf
+```
+
+> macOS and Windows manage UDP buffers automatically — no manual steps needed.
+
+### Disabling compression for already-compressed data
+
+Zstd is skipped automatically for common pre-compressed extensions (`.zip`, `.mp4`, `.jpg`, `.mkv`, …). For everything else, if you know your data is incompressible:
+
+```bash
+hayate send ./rawdump.bin --compress=false
+```
+
+---
+
 ## Security
 
 Hayate builds its trust model at the application layer on top of QUIC's transport encryption.
@@ -190,6 +242,8 @@ Hayate builds its trust model at the application layer on top of QUIC's transpor
 | Metadata         | Filename and size encrypted before transmission                    |
 
 > **Pairing mode**: only peers who know the exact code phrase can derive the session key. **Direct mode**: relies on network locality (no passphrase).
+
+All crypto is implemented via [`ring`](https://github.com/briansmith/ring) — no hand-rolled primitives, no `unsafe` crypto code.
 
 ---
 
@@ -215,6 +269,14 @@ just build     # release build
 just check     # fmt + clippy + test
 ```
 
+### Minimum Rust version
+
+Hayate v6 requires **Rust 1.96** (edition 2024). Install or update via:
+
+```bash
+rustup update stable
+```
+
 ---
 
 ## Library
@@ -223,7 +285,7 @@ Hayate is also a Rust library. Embed the transfer engine in your own application
 
 ```toml
 [dependencies]
-hayate = "4"
+hayate = "6"
 compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
 ```
 
