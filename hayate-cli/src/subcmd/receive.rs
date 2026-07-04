@@ -429,20 +429,15 @@ fn is_peer_close(e: &QuicConnectionError) -> bool {
 /// Re-creates a "Waiting" spinner after handling a failed connection.
 /// Any previous spinner is finished and cleared first so only one live
 /// spinner appears at a time.
-fn respawn_spinner(
-    no_progress: bool,
-    current: &mut Option<indicatif::ProgressBar>,
-) -> Option<indicatif::ProgressBar> {
+fn respawn_spinner(no_progress: bool, current: &mut Option<indicatif::ProgressBar>) {
     if let Some(pb) = current.take() {
         pb.finish_and_clear();
     }
-    if no_progress {
-        None
-    } else {
-        Some(crate::output::spinner(
+    if !no_progress {
+        *current = Some(crate::output::spinner(
             "Waiting",
             "for incoming connection…",
-        ))
+        ));
     }
 }
 
