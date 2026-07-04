@@ -14,13 +14,13 @@ export function CodeBlock({
   return (
     <div
       className={cn(
-        'group relative overflow-hidden rounded-xl border bg-fd-card',
+        'code-block group relative overflow-hidden',
         className,
       )}
     >
       {title ? (
-        <div className="flex items-center justify-between border-b bg-fd-muted/40 px-4 py-2">
-          <span className="text-xs font-medium uppercase tracking-wider text-fd-muted-foreground">
+        <div className="flex items-center justify-between border-b border-hairline px-4 py-2 bg-canvas-soft">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted">
             {title}
           </span>
           <CopyButton text={code} />

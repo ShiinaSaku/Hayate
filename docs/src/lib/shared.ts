@@ -14,5 +14,5 @@ export const gitConfig = {
   branch: 'master',
 };
 
-export const siteUrl = 'https://shiinasaku.github.io/Hayate';
+export const siteUrl = 'https://hayate.shiina.xyz';
 export const twitterHandle = '@ShiinaSaku';

@@ -9,9 +9,9 @@ export async function GET() {
       title={appName}
       description={description}
       site={siteUrl.replace(/^https?:\/\//, '')}
-      icon={<Logo className="h-14 w-14 text-cyan-400" />}
-      primaryColor="rgba(6,182,212,0.35)"
-      primaryTextColor="#22d3ee"
+      icon={<Logo className="h-16 w-16" style={{ color: '#f54e00' }} />}
+      primaryColor="rgba(245,78,0,0.35)"
+      primaryTextColor="#f54e00"
     />,
     {
       width: 1200,

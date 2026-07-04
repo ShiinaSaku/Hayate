@@ -1,9 +1,16 @@
-export function Logo({ className = 'h-16 w-16' }: { className?: string }) {
+export function Logo({
+  className = 'h-16 w-16',
+  style,
+}: {
+  className?: string;
+  style?: React.CSSProperties;
+}) {
   return (
     <svg
       viewBox="0 0 100 100"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      style={style}
       aria-label="Hayate logo"
     >
       <g
