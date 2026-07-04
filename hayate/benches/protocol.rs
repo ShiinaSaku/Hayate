@@ -5,7 +5,7 @@
 //! bytes flow, so regressions here delay every transfer's start.
 
 use divan::Bencher;
-use hayate::protocol::{Metadata, TRANSFER_DIR, TRANSFER_FILE};
+use hayate::protocol::{Metadata, TransferKind};
 
 fn main() {
     divan::main();
@@ -15,7 +15,7 @@ fn sample_metadata() -> Metadata {
     Metadata::new(
         "2026-projects-archive.tar.zst".to_owned(),
         1 << 30,
-        TRANSFER_FILE,
+        TransferKind::File,
         "blake3".to_owned(),
     )
 }
@@ -49,7 +49,7 @@ fn encode_decode_roundtrip(bencher: Bencher) {
 
 #[divan::bench]
 fn validate_long_filename(bencher: Bencher) {
-    let meta = Metadata::new("a".repeat(4000), 0, TRANSFER_FILE, "blake3".to_owned());
+    let meta = Metadata::new("a".repeat(4000), 0, TransferKind::File, "blake3".to_owned());
     bencher.bench(|| divan::black_box(divan::black_box(&meta).validate()));
 }
 
@@ -58,7 +58,7 @@ fn encode_directory_metadata(bencher: Bencher) {
     let meta = Metadata::new(
         "my-project-backup".to_owned(),
         0,
-        TRANSFER_DIR,
+        TransferKind::Directory,
         "blake3".to_owned(),
     );
     bencher.bench(|| divan::black_box(divan::black_box(&meta).encode()));
@@ -66,7 +66,12 @@ fn encode_directory_metadata(bencher: Bencher) {
 
 #[divan::bench]
 fn decode_large_payload(bencher: Bencher) {
-    let meta = Metadata::new("x".repeat(200), 1 << 40, TRANSFER_FILE, "blake3".to_owned());
+    let meta = Metadata::new(
+        "x".repeat(200),
+        1 << 40,
+        TransferKind::File,
+        "blake3".to_owned(),
+    );
     let encoded = meta.encode();
     bencher.bench(|| divan::black_box(Metadata::decode(divan::black_box(&encoded)).unwrap()));
 }

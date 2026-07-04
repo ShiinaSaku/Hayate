@@ -23,7 +23,7 @@
 //! | 2 | Filename byte length |
 //! | M | UTF-8 filename |
 //! | 8 | File size, or `0` for directory streams |
-//! | 1 | Transfer type: [`TRANSFER_FILE`] or [`TRANSFER_DIR`] |
+//! | 1 | Transfer type: [`TransferKind::File`] or [`TransferKind::Directory`] |
 //! | 1 | Hash algorithm name length |
 //! | H | Hash algorithm name |
 //!
@@ -31,27 +31,59 @@
 //! uncompressed payloads, [`FRAME_ZSTD`] for zstd-compressed payloads.
 
 /// Current binary wire protocol version.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub(crate) const PROTOCOL_VERSION: u16 = 6;
 
 /// Metadata transfer type for a single file.
-pub const TRANSFER_FILE: u8 = 0x00;
+pub(crate) const TRANSFER_FILE: u8 = 0x00;
 /// Metadata transfer type for a directory encoded as a tar stream.
-pub const TRANSFER_DIR: u8 = 0x01;
+pub(crate) const TRANSFER_DIR: u8 = 0x01;
+
+/// Transfer kind: a single file or a directory encoded as a tar stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TransferKind {
+    /// A single file transfer.
+    File = 0x00,
+    /// A directory transfer, streamed as a tar archive.
+    Directory = 0x01,
+}
+
+impl TransferKind {
+    /// Converts a wire transfer-type byte into a [`TransferKind`].
+    ///
+    /// Returns `None` for unknown values.
+    #[must_use]
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            TRANSFER_FILE => Some(Self::File),
+            TRANSFER_DIR => Some(Self::Directory),
+            _ => None,
+        }
+    }
+
+    /// Returns the wire transfer-type byte for this kind.
+    #[must_use]
+    #[allow(clippy::as_conversions)]
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
 
 /// Payload frame flag for bytes that were sent without compression.
-pub const FRAME_RAW: u8 = 0x00;
+pub(crate) const FRAME_RAW: u8 = 0x00;
 /// Payload frame flag for bytes compressed with zstd.
-pub const FRAME_ZSTD: u8 = 0x01;
+pub(crate) const FRAME_ZSTD: u8 = 0x01;
 
 /// Maximum allowed filename length in bytes.
-pub const MAX_FILENAME_BYTES: usize = 4096;
+pub(crate) const MAX_FILENAME_BYTES: usize = 4096;
 
 /// Maximum encrypted metadata payload size.
 ///
 /// The cap includes the plaintext metadata fields plus nonce/tag overhead and
 /// a small margin, preventing malicious peers from forcing large allocations
 /// during the handshake.
-pub const MAX_METADATA_ENCRYPTED: usize = 4 + MAX_FILENAME_BYTES + 8 + 1 + 1 + 256 + 12 + 16 + 16;
+pub(crate) const MAX_METADATA_ENCRYPTED: usize =
+    4 + MAX_FILENAME_BYTES + 8 + 1 + 1 + 256 + 12 + 16 + 16;
 
 /// Chunk size for each data frame in bytes.
 ///
@@ -60,7 +92,7 @@ pub const MAX_METADATA_ENCRYPTED: usize = 4 + MAX_FILENAME_BYTES + 8 + 1 + 1 + 2
 /// the old 1 MiB size, cutting syscall and scheduler overhead proportionally.
 /// The pipeline pool and QUIC flow windows are sized to keep 8 frames in flight
 /// simultaneously, so peak buffer usage is ~256 MiB across sender + receiver.
-pub const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
+pub(crate) const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
 /// Metadata that travels in the encrypted handshake.
 #[derive(Debug, Clone)]
@@ -70,16 +102,21 @@ pub struct Metadata {
     pub filename: String,
     /// Total bytes for a file transfer; 0 for directories (streaming, unknown).
     pub total_size: u64,
-    /// Transfer kind, either [`TRANSFER_FILE`] or [`TRANSFER_DIR`].
-    pub transfer_type: u8,
+    /// Transfer kind, either [`TransferKind::File`] or [`TransferKind::Directory`].
+    pub transfer_type: TransferKind,
     /// Hash algorithm used for payload integrity (e.g., "blake3", "sha256").
     pub hash_algo: String,
 }
 
 impl Metadata {
-    /// Creates a new validated [`Metadata`] instance.
+    /// Creates a new [`Metadata`] instance.
     #[must_use]
-    pub fn new(filename: String, total_size: u64, transfer_type: u8, hash_algo: String) -> Self {
+    pub fn new(
+        filename: String,
+        total_size: u64,
+        transfer_type: TransferKind,
+        hash_algo: String,
+    ) -> Self {
         Self {
             filename,
             total_size,
@@ -90,20 +127,13 @@ impl Metadata {
 
     /// Validates metadata fields before they are encoded or used to route a payload.
     ///
-    /// This rejects empty or oversized names and transfer kinds outside the
-    /// protocol's currently defined file/directory variants.
+    /// This rejects empty or oversized names and oversized hash algorithm names.
     #[inline]
     pub fn validate(&self) -> Result<(), crate::EngineError> {
         let name_len = self.filename.len();
         if name_len.wrapping_sub(1) >= MAX_FILENAME_BYTES {
             return Err(crate::EngineError::InvalidFrame(format!(
                 "invalid filename length: {name_len}"
-            )));
-        }
-        if self.transfer_type > TRANSFER_DIR {
-            return Err(crate::EngineError::InvalidFrame(format!(
-                "invalid transfer type: 0x{transfer_type:02x}",
-                transfer_type = self.transfer_type,
             )));
         }
         let algo_len = self.hash_algo.len();
@@ -126,7 +156,7 @@ impl Metadata {
         buf.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
         buf.extend_from_slice(name_bytes);
         buf.extend_from_slice(&self.total_size.to_be_bytes());
-        buf.push(self.transfer_type);
+        buf.push(self.transfer_type.as_u8());
         buf.push(algo_bytes.len() as u8);
         buf.extend_from_slice(algo_bytes);
         buf
@@ -158,7 +188,12 @@ impl Metadata {
                 .try_into()
                 .map_err(|_| crate::EngineError::InvalidFrame("metadata truncated".into()))?,
         );
-        let transfer_type = raw[2 + name_len + 8];
+        let transfer_type = TransferKind::from_u8(raw[2 + name_len + 8]).ok_or_else(|| {
+            crate::EngineError::InvalidFrame(format!(
+                "invalid transfer type: 0x{:02x}",
+                raw[2 + name_len + 8]
+            ))
+        })?;
         let algo_len = raw[2 + name_len + 9] as usize;
         if raw.len() < 2 + name_len + 10 + algo_len {
             return Err(crate::EngineError::InvalidFrame(
@@ -190,16 +225,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_unknown_transfer_type() {
-        let meta = Metadata::new("name".to_owned(), 0, 0xff, "blake3".to_owned());
-
-        let err = meta.validate().unwrap_err();
-        assert!(matches!(err, crate::EngineError::InvalidFrame(_)));
-    }
-
-    #[test]
     fn validate_rejects_empty_filename() {
-        let meta = Metadata::new(String::new(), 0, TRANSFER_FILE, "blake3".to_owned());
+        let meta = Metadata::new(String::new(), 0, TransferKind::File, "blake3".to_owned());
 
         let err = meta.validate().unwrap_err();
         assert!(matches!(err, crate::EngineError::InvalidFrame(_)));

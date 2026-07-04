@@ -14,7 +14,7 @@ use anyhow::{Context, Result, bail};
 use compio_quic::ConnectionError as QuicConnectionError;
 use hayate::{
     EngineError, local_addr, network,
-    protocol::{Metadata, TRANSFER_DIR},
+    protocol::{Metadata, TransferKind},
     transfer,
 };
 
@@ -97,7 +97,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         .context("Handshake cipher negotiation failed")?;
 
         // ── Transfer offer card ──────────────────────────────────────
-        let kind = if meta.transfer_type == TRANSFER_DIR {
+        let kind = if meta.transfer_type == TransferKind::Directory {
             "directory"
         } else {
             "file"
@@ -290,7 +290,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         };
 
         // ── Transfer offer card ──────────────────────────────────────
-        let kind = if meta.transfer_type == TRANSFER_DIR {
+        let kind = if meta.transfer_type == TransferKind::Directory {
             "directory"
         } else {
             "file"
@@ -488,7 +488,7 @@ fn prompt_accept(
     peer: SocketAddr,
     default_dir: &std::path::Path,
 ) -> Result<Option<PathBuf>> {
-    let kind = if meta.transfer_type == TRANSFER_DIR {
+    let kind = if meta.transfer_type == TransferKind::Directory {
         "directory"
     } else {
         "file"

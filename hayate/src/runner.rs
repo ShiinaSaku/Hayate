@@ -12,7 +12,7 @@ use compio::io::AsyncRead;
 
 use crate::{
     EngineError, network,
-    protocol::{Metadata, TRANSFER_DIR, TRANSFER_FILE},
+    protocol::{Metadata, TransferKind},
     transfer,
 };
 
@@ -235,13 +235,18 @@ impl HayateSender {
         if path.is_dir() {
             let total = crate::tar::estimate_dir_size(path);
             Ok((
-                Metadata::new(filename, total, TRANSFER_DIR, self.hash_algo.clone()),
+                Metadata::new(
+                    filename,
+                    total,
+                    TransferKind::Directory,
+                    self.hash_algo.clone(),
+                ),
                 total,
             ))
         } else {
             let total = std::fs::metadata(path).map_err(EngineError::Io)?.len();
             Ok((
-                Metadata::new(filename, total, TRANSFER_FILE, self.hash_algo.clone()),
+                Metadata::new(filename, total, TransferKind::File, self.hash_algo.clone()),
                 total,
             ))
         }

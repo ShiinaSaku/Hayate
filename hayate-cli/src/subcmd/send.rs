@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use compio::io::AsyncRead;
-use hayate::{EngineError, HayateSender, network, protocol::TRANSFER_DIR, transfer};
+use hayate::{EngineError, HayateSender, network, protocol::TransferKind, transfer};
 
 use crate::{cli::SendArgs, output};
 
@@ -142,7 +142,7 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     .context("Handshake cipher negotiation failed")?;
 
     // ── Show transfer info card ──────────────────────────────────────
-    let kind = if meta.transfer_type == TRANSFER_DIR {
+    let kind = if meta.transfer_type == TransferKind::Directory {
         "directory"
     } else {
         "file"

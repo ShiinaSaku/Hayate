@@ -174,6 +174,7 @@ pub use discovery::BroadcasterGuard;
 pub use discovery::DiscoveredPeer;
 pub use error::EngineError;
 pub use protocol::Metadata;
+pub use protocol::TransferKind;
 pub use runner::{HayateReceiver, HayateSender};
 
 /// Encode bytes as a lowercase hex string. Replaces the external `hex` crate.

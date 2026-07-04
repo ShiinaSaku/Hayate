@@ -18,7 +18,7 @@ use crate::{
     EngineError, crypto,
     protocol::{
         CHUNK_SIZE, FRAME_RAW, FRAME_ZSTD, MAX_METADATA_ENCRYPTED, Metadata, PROTOCOL_VERSION,
-        TRANSFER_DIR, TRANSFER_FILE,
+        TransferKind,
     },
 };
 
@@ -672,7 +672,7 @@ pub async fn receive_payload<S>(
     cipher_id: u8,
     stream: &mut S,
     output_path: &Path,
-    transfer_type: u8,
+    transfer_type: TransferKind,
     expected_size: u64,
     hash_algo: &str,
     mut progress_cb: impl FnMut(u64) -> Result<(), EngineError> + 'static,
@@ -680,9 +680,10 @@ pub async fn receive_payload<S>(
 where
     S: compio::io::AsyncRead + Unpin,
 {
-    if transfer_type != TRANSFER_FILE && transfer_type != TRANSFER_DIR {
+    if transfer_type != TransferKind::File && transfer_type != TransferKind::Directory {
         return Err(EngineError::InvalidFrame(format!(
-            "invalid transfer type: 0x{transfer_type:02x}"
+            "invalid transfer type: 0x{:02x}",
+            transfer_type.as_u8()
         )));
     }
 
@@ -691,7 +692,7 @@ where
 
     let (tx, rx) = flume::bounded::<Vec<u8>>(8);
 
-    let extract_handle = if transfer_type == TRANSFER_DIR {
+    let extract_handle = if transfer_type == TransferKind::Directory {
         let out = output_path.to_path_buf();
         let pool_clone = plain_pool.clone();
         Some(std::thread::spawn(move || -> Result<(), EngineError> {
@@ -748,7 +749,7 @@ where
     };
 
     let mut cleanup_guard = None;
-    let mut sink = if transfer_type == TRANSFER_FILE {
+    let mut sink = if transfer_type == TransferKind::File {
         let f = compio::fs::File::create(output_path)
             .await
             .map_err(EngineError::Io)?;
@@ -926,7 +927,7 @@ where
         }
 
         // Size validation
-        if transfer_type == TRANSFER_FILE {
+        if transfer_type == TransferKind::File {
             if total != expected_size {
                 return Err(EngineError::Io(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -936,7 +937,7 @@ where
                 )));
             }
         } else {
-            // TRANSFER_DIR. The metadata size is an estimate of file contents,
+            // Directory transfer. The metadata size is an estimate of file contents,
             // not the tar stream size; allow tar header/padding overhead but
             // cap the total to prevent a runaway peer from filling the disk.
             let max_dir_size = expected_size
@@ -1089,7 +1090,7 @@ pub async fn receive_payload_split(
     cipher_id: u8,
     stream: &mut compio_quic::RecvStream,
     output_path: &Path,
-    transfer_type: u8,
+    transfer_type: TransferKind,
     expected_size: u64,
     hash_algo: &str,
     progress_cb: impl FnMut(u64) -> Result<(), EngineError> + 'static,
