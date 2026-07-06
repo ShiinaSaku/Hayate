@@ -209,13 +209,14 @@ async function buildPlatformPackage(target: Target, version: string, releaseDir:
 
   await Bun.write(join(pkgDir, target.binary), Bun.file(binPath));
 
+  const template = JSON.parse(
+    await Bun.file(join(import.meta.dir, "..", "npm", "pkg-template", "package.json")).text(),
+  ) as Record<string, unknown>;
   const pkgJson = {
+    ...template,
     name: target.npmPkg,
     version,
     description: `Hayate CLI binary for ${target.os} ${target.cpu}`,
-    license: "MIT",
-    repository: { type: "git", url: "git+https://github.com/ShiinaSaku/Hayate.git" },
-    homepage: "https://hayate.shiina.xyz",
     os: [target.os],
     cpu: [target.cpu],
     binary: target.binary,
