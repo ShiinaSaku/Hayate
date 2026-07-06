@@ -1,11 +1,11 @@
 //! Hayate CLI application.
 
 mod cli;
+mod exit_code;
 mod output;
+mod policy;
 mod subcmd;
 mod words;
-
-mod exit_code;
 
 use std::process::{ExitCode, Termination};
 use std::sync::Arc;
@@ -89,6 +89,8 @@ fn run() -> Result<ExitCode> {
             err.exit();
         }
     };
+
+    policy::init(&cli);
 
     if cli.command.is_none() {
         output::print_banner();

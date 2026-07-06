@@ -18,7 +18,7 @@ use hayate::{
     transfer,
 };
 
-use crate::{cli::ReceiveArgs, output};
+use crate::{cli::ReceiveArgs, output, policy};
 
 pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     // ESC / q listener — polls tty in raw mode, exits cleanly via cancelled flag.
@@ -137,7 +137,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         output::key_value("output", dest.display());
         let start = Instant::now();
 
-        let pb = if args.no_progress || meta.total_size == 0 {
+        let pb = if args.no_progress || meta.total_size == 0 || policy::get().no_progress() {
             None
         } else {
             let pb = output::transfer_progress_bar("receive", meta.total_size);
@@ -333,7 +333,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         output::key_value("output", dest.display());
         let start = Instant::now();
 
-        let pb = if args.no_progress || meta.total_size == 0 {
+        let pb = if args.no_progress || meta.total_size == 0 || policy::get().no_progress() {
             None
         } else {
             let pb = output::transfer_progress_bar("receive", meta.total_size);

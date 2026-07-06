@@ -24,6 +24,17 @@ pub enum ColorMode {
     Never,
 }
 
+/// Output format for machine-readable consumers.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable styled output (default).
+    Pretty,
+    /// Compact text without styling or progress bars.
+    Plain,
+    /// Newline-delimited JSON events.
+    Json,
+}
+
 /// Hayate — encrypted, compressed, blazing-fast LAN file transfer.
 #[derive(Parser, Debug)]
 #[command(
@@ -48,6 +59,18 @@ pub struct Cli {
     /// Control colored output.
     #[arg(long, global = true, value_enum, default_value_t = ColorMode::Auto)]
     pub color: ColorMode,
+
+    /// Output format.
+    #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Pretty)]
+    pub format: OutputFormat,
+
+    /// Suppress informational output; show warnings and errors only.
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub quiet: u8,
+
+    /// Increase verbosity; repeat for more detail (e.g. -vv).
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 }
 
 #[derive(Subcommand, Debug)]
@@ -66,6 +89,9 @@ pub enum Command {
 
     /// Generate shell completion scripts.
     Completions(CompletionsArgs),
+
+    /// Print man pages generated from the CLI definition.
+    Man(ManArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -136,4 +162,17 @@ pub struct CompletionsArgs {
     /// Shell to generate a completion script for.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+
+    /// Install the completion script to the shell's default config directory
+    /// instead of printing it to stdout.
+    #[arg(long)]
+    pub install: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ManArgs {
+    /// Man page to print. Use `hayate` for the top-level page, or a subcommand
+    /// name (e.g. `send`, `receive`) for its dedicated page.
+    #[arg(default_value = "hayate")]
+    pub page: String,
 }

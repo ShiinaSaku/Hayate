@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use compio::io::AsyncRead;
 use hayate::{EngineError, HayateSender, network, protocol::TransferKind, transfer};
 
-use crate::{cli::SendArgs, output};
+use crate::{cli::SendArgs, output, policy};
 
 pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     if cancelled.load(Ordering::SeqCst) {
@@ -30,7 +30,7 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         (code.clone(), false)
     } else if target.is_none() {
         let p = crate::words::generate_phrase();
-        (p, true)
+        (p, policy::get().normal())
     } else {
         (String::new(), false)
     };
@@ -168,12 +168,12 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     );
 
     // ── Stage 4: Transfer ────────────────────────────────────────────
-    let pb = if args.no_progress || total_size == 0 {
-        None
-    } else {
-        let pb = output::transfer_progress_bar("send", total_size);
-        Some(pb)
-    };
+        let pb = if args.no_progress || total_size == 0 || policy::get().no_progress() {
+            None
+        } else {
+            let pb = output::transfer_progress_bar("send", total_size);
+            Some(pb)
+        };
 
     let start = Instant::now();
     let cancelled_transfer = Arc::clone(&cancelled);
