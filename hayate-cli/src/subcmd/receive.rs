@@ -114,13 +114,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         let dest = if args.auto_accept {
             Some(resolve_output(&args.output, &meta))
         } else {
-            if let Some(pb) = &spinner {
-                output::hide_progress(pb);
-            }
-            let result = prompt_accept(&meta, peer, &args.output);
-            if let Some(pb) = &spinner {
-                output::show_progress(pb);
-            }
+            let result = output::suspend_for_prompt(|| prompt_accept(&meta, peer, &args.output));
             result?
         };
 
@@ -314,13 +308,7 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         let dest = if args.auto_accept {
             Some(resolve_output(&args.output, &meta))
         } else {
-            if let Some(pb) = &spinner {
-                output::hide_progress(pb);
-            }
-            let result = prompt_accept(&meta, peer, &args.output);
-            if let Some(pb) = &spinner {
-                output::show_progress(pb);
-            }
+            let result = output::suspend_for_prompt(|| prompt_accept(&meta, peer, &args.output));
             result?
         };
 

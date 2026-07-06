@@ -7,11 +7,27 @@
 //! some Termux configurations), box-drawing glyphs fall back to plain ASCII.
 
 use std::io::IsTerminal;
+use std::sync::OnceLock;
 
 use console::style;
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 const VERSION: &str = env!("GIT_VERSION");
+
+// Global MultiProgress manager. Using a single MultiProgress even for one bar
+// lets us safely println during active bars and suspend for prompts without
+// corrupting the terminal. MultiProgress::new is cheap and safe to create even
+// when not a TTY.
+static MULTI: OnceLock<MultiProgress> = OnceLock::new();
+
+/// Returns the shared `MultiProgress` instance.
+///
+/// All spinners and progress bars should be created through this manager so
+/// plain status messages can be printed safely while bars are active.
+#[inline]
+pub fn multi() -> &'static MultiProgress {
+    MULTI.get_or_init(MultiProgress::new)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Terminal capability detection
@@ -34,14 +50,13 @@ thread_local! {
         }
     };
 
-    /// Whether stdout is a true terminal (not piped/redirected).
+    /// Whether stderr is a true terminal (not piped/redirected).
+    ///
+    /// MultiProgress defaults to stderr, so we use stderr TTY status as the gate.
     static IS_TTY: bool = std::io::stderr().is_terminal();
 }
 
 /// Returns `true` when stderr is a real terminal (not piped or redirected).
-///
-/// Progress bars and spinners draw to stderr so stdout stays free for
-/// structured or pipeable output. We use stderr TTY status as the gate.
 #[inline]
 pub fn is_tty() -> bool {
     IS_TTY.with(|v| *v)
@@ -107,6 +122,114 @@ fn box_line(width: usize) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Status lines — route through MultiProgress when a bar may be active
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn info(msg: &str) {
+    let text = format!(
+        "   {}  {}",
+        style(icon_info()).bold().blue(),
+        style(msg).white()
+    );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
+}
+
+pub fn ok(msg: &str) {
+    let text = format!("   {}  {}", style(icon_ok()).bold().green(), msg);
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
+}
+
+pub fn warn(msg: &str) {
+    let text = format!(
+        "   {}  {}",
+        style(icon_warn()).bold().yellow(),
+        style(msg).yellow()
+    );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
+}
+
+pub fn err(msg: &str) {
+    let text = format!(
+        "   {}  {}",
+        style(icon_err()).bold().red(),
+        style(msg).red()
+    );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        eprintln!("{text}");
+    }
+}
+
+pub fn print_error(err: &anyhow::Error) {
+    let mut lines = Vec::new();
+    let mut chain = err.chain();
+    let branch = if unicode_capable() { "└─" } else { "`-" };
+    if let Some(top_err) = chain.next() {
+        lines.push(format!(
+            "   {}  {}",
+            style(icon_err()).bold().red(),
+            style(top_err.to_string()).bold().red()
+        ));
+    }
+    for cause in chain {
+        lines.push(format!(
+            "      {} {}",
+            style(branch).dim(),
+            style(cause.to_string()).dim()
+        ));
+    }
+    if is_tty() {
+        for line in lines {
+            let _ = multi().println(line);
+        }
+    } else {
+        for line in lines {
+            eprintln!("{line}");
+        }
+    }
+}
+
+pub fn stage(name: &str, detail: impl std::fmt::Display) {
+    let text = format!(
+        "   {}  {:<11} {}",
+        style(icon_arrow()).bold().cyan(),
+        style(name).bold(),
+        style(detail).white()
+    );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
+}
+
+pub fn key_value(key: &str, value: impl std::fmt::Display) {
+    let text = format!(
+        "      {} {}",
+        style(format!("{key:<10}")).dim(),
+        style(value).white().bold()
+    );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Banner
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -118,16 +241,16 @@ pub fn print_banner() {
         let logo = r#"
     __  _______  _____  ____________
    / / / /   \ \/ /   |/_  __/ ____/
-  / /_/ / /| |\  / /| | / / / __/   
- / __  / ___ |/ / ___ |/ / / /___   
-/_/ /_/_/  |_/_/_/  |_/_/ /_____/   
+  / /_/ / /| |\  / /| | / / / __/
+ / __  / ___ |/ / ___ |/ / / /___
+/_/ /_/_/  |_/_/_/  |_/_/ /_____/
 "#;
         println!("{}", style(logo).bold().cyan());
     } else {
         let logo = r#"
-  _  _   ___   ___ _____ ___ 
+  _  _   ___   ___ _____ ___
  | || | /_\ \ / /_\_   _| __|
- | __ |/ _ \ V / _ \| | | _| 
+ | __ |/ _ \ V / _ \| | | _|
  |_||_/_/ \_\_/_/ \_\_| |___|
 "#;
         println!("{}", style(logo).bold().cyan());
@@ -144,74 +267,6 @@ pub fn print_banner() {
     );
     println!("   {}", style(separator.repeat(50)).dim());
     println!();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Status lines
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub fn info(msg: &str) {
-    println!(
-        "   {}  {}",
-        style(icon_info()).bold().blue(),
-        style(msg).white()
-    );
-}
-
-pub fn ok(msg: &str) {
-    println!("   {}  {}", style(icon_ok()).bold().green(), msg);
-}
-
-pub fn warn(msg: &str) {
-    println!(
-        "   {}  {}",
-        style(icon_warn()).bold().yellow(),
-        style(msg).yellow()
-    );
-}
-
-pub fn err(msg: &str) {
-    eprintln!(
-        "   {}  {}",
-        style(icon_err()).bold().red(),
-        style(msg).red()
-    );
-}
-
-pub fn print_error(err: &anyhow::Error) {
-    let mut chain = err.chain();
-    let branch = if unicode_capable() { "└─" } else { "`-" };
-    if let Some(top_err) = chain.next() {
-        eprintln!(
-            "   {}  {}",
-            style(icon_err()).bold().red(),
-            style(top_err.to_string()).bold().red()
-        );
-    }
-    for cause in chain {
-        eprintln!(
-            "      {} {}",
-            style(branch).dim(),
-            style(cause.to_string()).dim()
-        );
-    }
-}
-
-pub fn stage(name: &str, detail: impl std::fmt::Display) {
-    println!(
-        "   {}  {:<11} {}",
-        style(icon_arrow()).bold().cyan(),
-        style(name).bold(),
-        style(detail).white()
-    );
-}
-
-pub fn key_value(key: &str, value: impl std::fmt::Display) {
-    println!(
-        "      {} {}",
-        style(format!("{key:<10}")).dim(),
-        style(value).white().bold()
-    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,7 +447,7 @@ fn spinner_tick_chars() -> &'static str {
     }
 }
 
-/// Creates a labelled transfer progress bar with premium styling.
+/// Creates a labelled transfer progress bar attached to the shared MultiProgress.
 pub fn transfer_progress_bar(label: &str, total_bytes: u64) -> ProgressBar {
     let template = if unicode_capable() {
         "   {prefix:.bold.cyan} {spinner} {wide_bar:.cyan/blue} {bytes:>10}/{total_bytes:10}  {bytes_per_sec:>11.green}  {eta:>6.dim}"
@@ -402,14 +457,9 @@ pub fn transfer_progress_bar(label: &str, total_bytes: u64) -> ProgressBar {
     let style = ProgressStyle::with_template(template)
         .expect("valid template")
         .progress_chars(progress_chars());
-    let pb = ProgressBar::new(total_bytes);
+    let pb = multi().add(ProgressBar::new(total_bytes));
     pb.set_style(style);
     pb.set_prefix(format!("{label:>8}"));
-    if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
-    } else {
-        pb.set_draw_target(ProgressDrawTarget::hidden());
-    }
     // Seed the initial draw so the bar is visible before the first chunk
     // lands, and speed/ETA are calculated from actual progress deltas rather
     // than being polluted by zero-progress steady-tick samples.
@@ -431,8 +481,7 @@ pub fn finish_transfer_progress(pb: &ProgressBar, total_bytes: u64) {
     pb.finish_and_clear();
 }
 
-/// Creates a spinner for indeterminate progress. Prefix and message are
-/// combined into a single field to avoid line-wrapping on narrow terminals.
+/// Creates a spinner for indeterminate progress attached to the shared MultiProgress.
 pub fn spinner(label: &str, detail: &str) -> ProgressBar {
     let template = if unicode_capable() {
         "   {spinner:.cyan.bold}  {prefix:.bold}"
@@ -442,25 +491,21 @@ pub fn spinner(label: &str, detail: &str) -> ProgressBar {
     let style = ProgressStyle::with_template(template)
         .expect("valid template")
         .tick_chars(spinner_tick_chars());
-    let pb = ProgressBar::new_spinner();
+    let pb = multi().add(ProgressBar::new_spinner());
     pb.set_style(style);
     pb.set_prefix(format!("{label}  {detail}"));
     if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
         pb.enable_steady_tick(std::time::Duration::from_millis(120));
-    } else {
-        pb.set_draw_target(ProgressDrawTarget::hidden());
     }
     pb
 }
 
-/// Updates the detail portion of an existing spinner. Useful when the
-/// state changes (e.g., "waiting" → "receiver connected").
+/// Updates the detail portion of an existing spinner.
 pub fn spinner_update(pb: &ProgressBar, label: &str, detail: &str) {
     pb.set_prefix(format!("{label}  {detail}"));
 }
 
-/// Creates a progress bar for network scanning with host count.
+/// Creates a progress bar for network scanning attached to the shared MultiProgress.
 pub fn scan_progress_bar(total_hosts: u64) -> ProgressBar {
     let template = if unicode_capable() {
         "   {spinner:.cyan.bold}  Scanning {wide_bar:.cyan/blue} {pos:>4}/{len:<4} hosts  {msg:.dim.white}"
@@ -471,27 +516,22 @@ pub fn scan_progress_bar(total_hosts: u64) -> ProgressBar {
         .expect("valid template")
         .progress_chars(progress_chars())
         .tick_chars(spinner_tick_chars());
-    let pb = ProgressBar::new(total_hosts);
+    let pb = multi().add(ProgressBar::new(total_hosts));
     pb.set_style(style);
     if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
         pb.enable_steady_tick(std::time::Duration::from_millis(120));
-    } else {
-        pb.set_draw_target(ProgressDrawTarget::hidden());
     }
     pb
 }
 
-/// Temporarily hide a progress bar so an interactive prompt can draw cleanly.
-pub fn hide_progress(pb: &ProgressBar) {
-    pb.set_draw_target(ProgressDrawTarget::hidden());
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompt suspend helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Restore a progress bar to stderr after an interactive prompt finishes.
-pub fn show_progress(pb: &ProgressBar) {
-    if is_tty() {
-        pb.set_draw_target(ProgressDrawTarget::stderr_with_hz(10));
-    }
+/// Run a closure while the shared MultiProgress is suspended (all bars hidden).
+/// Use this around interactive prompts so the prompt can draw normally.
+pub fn suspend_for_prompt<R>(f: impl FnOnce() -> R) -> R {
+    multi().suspend(f)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -506,7 +546,7 @@ pub fn peer_found_live(
     rtt: &str,
     quality: &str,
 ) {
-    println!(
+    let text = format!(
         "   {} {}  {} {}  {}",
         style(quality).green(),
         style(name).white().bold(),
@@ -514,6 +554,11 @@ pub fn peer_found_live(
         style(os).dim(),
         style(rtt).dim(),
     );
+    if is_tty() {
+        let _ = multi().println(text);
+    } else {
+        println!("{text}");
+    }
 }
 
 pub fn print_peer_table(peers: &[(String, std::net::SocketAddr, String)]) {
