@@ -113,6 +113,24 @@ Cross-platform binaries are built with `bun run build.ts`:
 
 Linux cross-compiles use `cargo-zigbuild`. Android uses `cargo-ndk` when available, otherwise falls back to the NDK linker scripts in `.cargo/config.toml`.
 
+## npm distribution
+
+The release pipeline also publishes `@shiinasaku/hayate` to npm. The package is a small ESM wrapper that downloads the correct native binary as an optional dependency.
+
+```bash
+npm install -g @shiinasaku/hayate
+hayate --help
+```
+
+Platform packages:
+
+- `@shiinasaku/hayate-darwin-x64` / `@shiinasaku/hayate-darwin-arm64`
+- `@shiinasaku/hayate-linux-x64` / `@shiinasaku/hayate-linux-arm64`
+- `@shiinasaku/hayate-win32-x64` / `@shiinasaku/hayate-win32-arm64`
+- `@shiinasaku/hayate-android-x64` / `@shiinasaku/hayate-android-arm64`
+
+The npm release script is `bun run npm:release`. It downloads the GitHub release archives, repackages the binary for each platform, and publishes the scoped packages. It requires `NPM_TOKEN` in GitHub secrets.
+
 ## TypeScript release scripts
 
 `build.ts` and `scripts/tegami.mts` are checked with `bun run typecheck` (which runs `bun tsc --noEmit`). The root `tsconfig.json` only includes those files.
