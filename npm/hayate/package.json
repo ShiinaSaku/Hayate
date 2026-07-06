@@ -1,0 +1,41 @@
+{
+  "name": "@shiinasaku/hayate",
+  "version": "6.0.0",
+  "description": "Encrypted LAN file transfer — install the Hayate CLI from npm.",
+  "license": "MIT",
+  "author": {
+    "name": "ShiinaSaku",
+    "email": "saku@shiina.xyz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShiinaSaku/Hayate.git"
+  },
+  "homepage": "https://hayate.shiina.xyz",
+  "type": "module",
+  "bin": {
+    "hayate": "./bin/hayate.js"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "bin/",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "@shiinasaku/hayate-darwin-x64": "6.0.0",
+    "@shiinasaku/hayate-darwin-arm64": "6.0.0",
+    "@shiinasaku/hayate-linux-x64": "6.0.0",
+    "@shiinasaku/hayate-linux-arm64": "6.0.0",
+    "@shiinasaku/hayate-win32-x64": "6.0.0",
+    "@shiinasaku/hayate-win32-arm64": "6.0.0",
+    "@shiinasaku/hayate-android-x64": "6.0.0",
+    "@shiinasaku/hayate-android-arm64": "6.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

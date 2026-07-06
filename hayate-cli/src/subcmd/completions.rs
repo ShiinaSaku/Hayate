@@ -29,7 +29,9 @@ fn install(shell: &clap_complete::Shell, cmd: &mut clap::Command, name: &str) ->
     let mut buffer = Vec::new();
     clap_complete::generate(*shell, cmd, name, &mut buffer);
 
-    let parent = path.parent().ok_or_else(|| anyhow::anyhow!("completion path has no parent"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("completion path has no parent"))?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("failed to create directory {}", parent.display()))?;
     std::fs::write(&path, &buffer)

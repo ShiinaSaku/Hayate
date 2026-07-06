@@ -1,0 +1,20 @@
+{
+  "name": "@shiinasaku/hayate-darwin-x64",
+  "version": "6.0.0",
+  "description": "Hayate CLI binary for macOS Intel (x86_64)",
+  "license": "MIT",
+  "author": {
+    "name": "ShiinaSaku",
+    "email": "shiinasaku@example.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShiinaSaku/Hayate.git"
+  },
+  "homepage": "https://hayate.shiina.xyz",
+  "type": "module",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "binary": "hayate",
+  "files": ["hayate"]
+}

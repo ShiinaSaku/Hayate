@@ -29,3 +29,5 @@ opencode.json
 docs/doc_build/
 docs/node_modules/
 RELEASE.md
+node_modules/
+npm/dist/

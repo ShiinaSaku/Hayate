@@ -1,0 +1,23 @@
+{
+  "name": "hayate",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "bun build.ts",
+    "build:all": "bun build.ts --all",
+    "build:deb": "bun build.ts --all --deb",
+    "build:android": "bun build.ts --all --android",
+    "build:everything": "bun build.ts --all --android --deb",
+    "typecheck": "bun tsc --noEmit",
+    "tegami": "bun scripts/tegami.mts",
+    "npm:release": "bun scripts/npm-release.mts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "tegami": "^1.2.2",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -93,11 +93,64 @@ fails.
 
 ## Release (see `RELEASE.md` for the full walkthrough)
 
-release-plz and cargo-dist have been removed — a replacement pipeline is TBD. Releasing is
-manual for now: bump `[workspace.package] version` by hand, update `CHANGELOG.md`, tag, push,
-`cargo publish -p hayate`. `hayate-cli` stays `publish = false`. Never force-push/recreate a tag.
+Tegami drives versioning and publishing. Binary releases are built and uploaded automatically by GitHub Actions.
 
-## Docs site
+- Write a pending changelog under `.tegami/` (see the Release workflow section below).
+- Merge the Tegami version PR to bump versions and publish the `hayate` crate to crates.io.
+- The `publish` workflow creates a GitHub release; the `release-binaries` workflow then builds archives (and `.deb` packages) for Linux, macOS, Windows, and Android, and uploads them to the release.
+- `hayate-cli` stays `publish = false`; only the library is published to crates.io.
+- Never force-push or recreate a tag.
 
-`docs/` is a separate pnpm/Rspress project, not part of the Cargo workspace — see
-`docs/AGENTS.md` for its own commands and conventions.
+## Binary builds
+
+Cross-platform binaries are built with `bun run build.ts`:
+
+- `bun run build` — native host target
+- `bun run build:all` — every target this host can reach
+- `bun run build:deb` — Linux targets plus `.deb` packages (requires `dpkg-deb` or GNU `ar`)
+- `bun run build:android` — include Android (Termux) targets (requires `cargo-ndk` or the Android NDK)
+- `bun run build:everything` — all of the above
+
+Linux cross-compiles use `cargo-zigbuild`. Android uses `cargo-ndk` when available, otherwise falls back to the NDK linker scripts in `.cargo/config.toml`.
+
+## TypeScript release scripts
+
+`build.ts` and `scripts/tegami.mts` are checked with `bun run typecheck` (which runs `bun tsc --noEmit`). The root `tsconfig.json` only includes those files.
+
+# Release workflow
+
+This repository uses [Tegami](https://tegami.fuma-nama.dev) for versioning and publishing.
+
+## Write changelog files
+
+Create pending changelog files under `.tegami/` as `YYYY-MM-DD-{hash}.md`.
+
+See the [changelog format docs](https://tegami.fuma-nama.dev/changelog) for details.
+
+### Example
+
+```md
+---
+packages:
+  "npm:@acme/ui": patch
+---
+
+### Fix button hover state
+
+The hover color now matches the design system.
+```
+
+### Package references
+
+Use package names, ids, or groups in frontmatter. For example:
+
+- `"@acme/ui"` — package name
+- `"npm:@acme/ui"` — package id
+- `"group:acme"` — every package in a group
+
+Rules:
+
+- Include YAML frontmatter with `packages`
+- Include at least one `#`, `##`, or `###` heading in the body
+- Write user-facing release notes under each heading
+- Do not edit the publish lock file (`.tegami/publish-lock.yaml`) or package `CHANGELOG.md` files directly

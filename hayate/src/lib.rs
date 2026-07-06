@@ -38,6 +38,7 @@
 //!
 //! let checksum = sender.send("photos", |bytes_sent| {
 //!     println!("sent {bytes_sent} bytes");
+//!     Ok(())
 //! }).await?;
 //!
 //! println!("checksum {checksum}");
@@ -63,6 +64,7 @@
 //!     },
 //!     |bytes_received| {
 //!         println!("received {bytes_received} bytes");
+//!         Ok(())
 //!     },
 //! ).await?;
 //!

@@ -1,0 +1,149 @@
+name: Release Binaries
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            deb: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            zigbuild: true
+            deb: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+            android: true
+          - target: x86_64-linux-android
+            os: ubuntu-latest
+            android: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        run: cargo install cargo-zigbuild
+
+      - name: Install cargo-ndk
+        if: matrix.android
+        run: cargo install cargo-ndk
+
+      - name: Install Android NDK
+        if: matrix.android
+        uses: nttld/setup-ndk@f2c78c9639b9d4f6d112f46e14b5e1a7f5c4a52d # v1
+        id: setup-ndk
+        with:
+          # Pin to the latest r29 patch. Bump when a newer NDK is released.
+          ndk-version: r29b
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@f4d14e0e986089f467af9291c2a2899ff1d9eb61 # v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and package binary
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        shell: bash
+        run: |
+          args=("--target" "${{ matrix.target }}" "--release-dir" "dist" "--skip-checksums")
+          if [[ "${{ matrix.deb }}" == "true" ]]; then
+            args+=("--deb")
+          fi
+          bun run build.ts "${args[@]}"
+
+      - name: Upload release artifacts
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(dist/*)
+          if [[ ${#files[@]} -gt 0 ]]; then
+            gh release upload "${{ github.event.release.tag_name }}" dist/* \
+              --repo ${{ github.repository }} --clobber
+          else
+            echo "No artifacts in dist/ to upload"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  checksums:
+    name: Aggregate checksums
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        run: |
+          mkdir -p assets
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo ${{ github.repository }} -D assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute SHA256SUMS
+        run: |
+          cd assets
+          sha256sum * > ../SHA256SUMS.txt
+
+      - name: Upload SHA256SUMS
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" SHA256SUMS.txt \
+            --repo ${{ github.repository }} --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm:
+    name: Publish to npm
+    needs: checksums
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@f4d14e0e986089f467af9291c2a2899ff1d9eb61 # v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish npm packages
+        run: bun run npm:release --tag "${{ github.event.release.tag_name }}"

@@ -6,15 +6,17 @@
 
 **Encrypted LAN file transfer at wire speed.**
 
+[![Website](https://img.shields.io/badge/website-hayate.shiina.xyz-blue)](https://hayate.shiina.xyz)
 [![CI](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml/badge.svg)](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml)
 [![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-orange?logo=rust)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ShiinaSaku/Hayate?sort=semver)](https://github.com/ShiinaSaku/Hayate/releases)
 [![crates.io](https://img.shields.io/crates/v/hayate?color=orange)](https://crates.io/crates/hayate)
+[![npm](https://img.shields.io/npm/v/@shiinasaku/hayate?color=red)](https://www.npmjs.com/package/@shiinasaku/hayate)
 [![docs.rs](https://img.shields.io/docsrs/hayate?color=green)](https://docs.rs/hayate)
 [![Stars](https://img.shields.io/github/stars/ShiinaSaku/Hayate?style=social)](https://github.com/ShiinaSaku/Hayate)
 
-[Install](#install) • [Usage](#usage) • [Why Hayate](#why-hayate) • [Performance](#performance) • [Security](#security) • [Build](#build)
+[Website](https://hayate.shiina.xyz) • [Install](#install) • [Usage](#usage) • [Why Hayate](#why-hayate) • [Performance](#performance) • [Security](#security) • [Build](#build)
 
 </div>
 
@@ -82,8 +84,28 @@ Hayate is the only tool that combines QUIC transport, automatic LAN peer discove
 
 ## Install
 
-Automated multi-platform binary releases (cargo-dist) have been removed while a replacement
-pipeline is worked out — for now, build from source.
+The same binary is available from npm, crates.io, GitHub Releases, or by building from source.
+
+### npm (recommended for CLI users)
+
+```bash
+npm install -g @shiinasaku/hayate
+hayate --help
+```
+
+Supported platforms: macOS (Intel/Apple Silicon), Linux (x64/ARM64), Windows (x64/ARM64), and Android (Termux x64/ARM64). npm downloads the correct native binary automatically.
+
+### GitHub Releases
+
+Download a `.tar.gz`, `.zip`, or `.deb` package from the [latest release](https://github.com/ShiinaSaku/Hayate/releases).
+
+### From crates.io (library only)
+
+`hayate` (the engine) is published to crates.io; `hayate-cli` (the binary) is not — install it via npm or build from source.
+
+```bash
+cargo add hayate
+```
 
 ### Build from source
 
@@ -94,18 +116,9 @@ cargo build --release -p hayate-cli
 ./target/release/hayate --help
 ```
 
-### From crates.io (library only)
-
-`hayate` (the engine) is published; `hayate-cli` (the binary) is not — install it from source
-above, or depend on the library directly:
-
-```bash
-cargo add hayate
-```
-
 ### Android (Termux)
 
-Build from source with the Android target — see `just android-aarch64` / `just android-all`.
+Install via npm, or build from source with the Android target — see `just android-aarch64` / `just android-all`.
 
 ---
 
@@ -300,6 +313,7 @@ async fn main() -> Result<(), hayate::EngineError> {
 
     let checksum = sender.send("./file.txt", |bytes| {
         println!("sent {bytes} bytes");
+        Ok(())
     }).await?;
 
     Ok(())

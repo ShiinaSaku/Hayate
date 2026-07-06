@@ -168,12 +168,12 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     );
 
     // ── Stage 4: Transfer ────────────────────────────────────────────
-        let pb = if args.no_progress || total_size == 0 || policy::get().no_progress() {
-            None
-        } else {
-            let pb = output::transfer_progress_bar("send", total_size);
-            Some(pb)
-        };
+    let pb = if args.no_progress || total_size == 0 || policy::get().no_progress() {
+        None
+    } else {
+        let pb = output::transfer_progress_bar("send", total_size);
+        Some(pb)
+    };
 
     let start = Instant::now();
     let cancelled_transfer = Arc::clone(&cancelled);

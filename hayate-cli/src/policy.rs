@@ -116,34 +116,42 @@ mod tests {
 
     #[test]
     fn no_progress_in_json_and_plain() {
-        assert!(OutputPolicy {
-            format: OutputFormat::Json,
-            verbose: 0,
-            quiet: 0,
-        }
-        .no_progress());
-        assert!(OutputPolicy {
-            format: OutputFormat::Plain,
-            verbose: 0,
-            quiet: 0,
-        }
-        .no_progress());
-        assert!(!OutputPolicy {
-            format: OutputFormat::Pretty,
-            verbose: 0,
-            quiet: 0,
-        }
-        .no_progress());
+        assert!(
+            OutputPolicy {
+                format: OutputFormat::Json,
+                verbose: 0,
+                quiet: 0,
+            }
+            .no_progress()
+        );
+        assert!(
+            OutputPolicy {
+                format: OutputFormat::Plain,
+                verbose: 0,
+                quiet: 0,
+            }
+            .no_progress()
+        );
+        assert!(
+            !OutputPolicy {
+                format: OutputFormat::Pretty,
+                verbose: 0,
+                quiet: 0,
+            }
+            .no_progress()
+        );
     }
 
     #[test]
     fn quiet_suppresses_progress() {
-        assert!(OutputPolicy {
-            format: OutputFormat::Pretty,
-            verbose: 0,
-            quiet: 1,
-        }
-        .no_progress());
+        assert!(
+            OutputPolicy {
+                format: OutputFormat::Pretty,
+                verbose: 0,
+                quiet: 1,
+            }
+            .no_progress()
+        );
     }
 
     #[test]
@@ -157,17 +165,11 @@ mod tests {
         assert!(!base.info());
         assert!(base.normal());
 
-        let v1 = OutputPolicy {
-            verbose: 1,
-            ..base
-        };
+        let v1 = OutputPolicy { verbose: 1, ..base };
         assert!(v1.info());
         assert!(!v1.debug());
 
-        let v2 = OutputPolicy {
-            verbose: 2,
-            ..base
-        };
+        let v2 = OutputPolicy { verbose: 2, ..base };
         assert!(v2.debug());
     }
 
@@ -181,17 +183,11 @@ mod tests {
         assert!(!q1.normal());
         assert!(!q1.silent_warnings());
 
-        let q2 = OutputPolicy {
-            quiet: 2,
-            ..q1
-        };
+        let q2 = OutputPolicy { quiet: 2, ..q1 };
         assert!(q2.silent_warnings());
         assert!(!q2.silent_errors());
 
-        let q3 = OutputPolicy {
-            quiet: 3,
-            ..q1
-        };
+        let q3 = OutputPolicy { quiet: 3, ..q1 };
         assert!(q3.silent_errors());
     }
 }
