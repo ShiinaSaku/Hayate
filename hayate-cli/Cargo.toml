@@ -29,7 +29,6 @@ compio = { workspace = true }
 compio-quic = { workspace = true }
 console = { workspace = true }
 flume = { workspace = true }
-clap_mangen = "0.3"
 futures-util = { workspace = true }
 if-addrs = { workspace = true }
 indicatif = { workspace = true }
@@ -38,8 +37,6 @@ crossterm = { version = "0.29", default-features = false, features = ["events"] 
 dirs = "6"
 libc = "0.2"
 rand = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
-[build-dependencies]
-clap = { workspace = true }
-clap_complete = "4"
-clap_mangen = "0.3"

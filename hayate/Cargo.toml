@@ -32,9 +32,10 @@ futures-util = { workspace = true }
 quinn-proto = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
-# rand_core 0.6 pinned: x25519-dalek 2 requires CryptoRng from rand_core 0.6.
-# Workspace has rand_core 0.10 for rand/CLI; Cargo carries both in the tree.
-rand_core = { version = "0.6.4", features = ["getrandom"] }
+# x25519-dalek 3 and rand 0.10 share rand_core 0.10. OsRng moved to
+# getrandom::SysRng (wrapped via rand_core::UnwrapErr) in this rand_core line.
+rand_core = { version = "0.10" }
+getrandom = { version = "0.4", features = ["sys_rng"] }
 ring = { workspace = true }
 x25519-dalek = { workspace = true }
 

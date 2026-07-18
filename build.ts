@@ -13,22 +13,16 @@
  * The script:
  *   1. Reads the workspace version from the root Cargo.toml.
  *   2. Builds hayate-cli in release mode for the requested target(s).
- *   3. Generates shell completions and man pages from the freshly built binary.
+ *   3. Generates shell completions from the freshly built binary.
  *   4. Packages the binary + extras into .tar.gz (Unix/Android) or .zip (Windows).
  *   5. Builds .deb packages for Debian/Ubuntu on Linux targets (optional).
  *   6. Writes a SHA256SUMS file for every produced archive.
  */
 
 import { createHash } from "node:crypto";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { gzip } from "node:zlib";  
+import { gzip } from "node:zlib";
 import { promisify } from "node:util";
 
 const gzipAsync = promisify(gzip);
@@ -201,7 +195,7 @@ Options:
   --all                Build every target this host can reach
   --target, -t <triple> Build a specific target triple
   --release-dir, -o <dir> Output directory for archives (default: dist)
-  --skip-extras        Do not generate completions or man pages
+  --skip-extras        Do not generate shell completions
   --skip-checksums     Do not write SHA256SUMS
   --deb                Build .deb packages for Linux targets
   --android            Include Android (Termux) targets in --all
@@ -278,9 +272,7 @@ async function run(
   const exit = await proc.exited;
 
   if (exit !== 0) {
-    throw new Error(
-      `${cmd} ${args.join(" ")} exited with ${exit}\n${stdout}\n${stderr}`.trim(),
-    );
+    throw new Error(`${cmd} ${args.join(" ")} exited with ${exit}\n${stdout}\n${stderr}`.trim());
   }
 }
 
@@ -292,8 +284,12 @@ function archiveName(version: string, target: Target): string {
   return `hayate-v${version}-${target.triple}.${target.archive}`;
 }
 
+function debArch(target: Target): string {
+  return target.arch === "aarch64" ? "arm64" : "amd64";
+}
+
 function debName(version: string, target: Target): string {
-  return `hayate_${version}_${target.arch}.deb`;
+  return `hayate_${version}_${debArch(target)}.deb`;
 }
 
 function canBuild(target: Target, host: string): boolean {
@@ -330,14 +326,9 @@ function hasCargoZigbuildSync(): boolean {
 async function buildNativeHost(host: string, verbose: boolean): Promise<void> {
   const isZig = host.includes("linux") && hasCargoZigbuildSync();
   const builder = isZig ? "cargo-zigbuild" : "cargo";
-  await run(builder, [
-    "build",
-    "--release",
-    "--package",
-    "hayate-cli",
-    "--target",
-    host,
-  ], { verbose });
+  await run(builder, ["build", "--release", "--package", "hayate-cli", "--target", host], {
+    verbose,
+  });
 }
 
 async function buildTarget(
@@ -346,6 +337,7 @@ async function buildTarget(
   releaseDir: string,
   verbose: boolean,
   skipExtras: boolean,
+  host: string,
   extrasDir?: string,
   buildDeb = false,
 ): Promise<{ archive?: string; deb?: string }> {
@@ -353,6 +345,16 @@ async function buildTarget(
 
   const builder = await pickBuilder(target);
   const buildArgs = buildArgsFor(target, builder);
+
+  // Ensure the cross-compilation std target is installed so a fresh host
+  // doesn't fail mid-build with "can't find crate for std".
+  if (target.triple !== host) {
+    try {
+      await run("rustup", ["target", "add", target.triple], { verbose });
+    } catch (err) {
+      log(`  could not install target ${target.triple}: ${err}`);
+    }
+  }
 
   try {
     await run(builder, buildArgs, { verbose });
@@ -416,14 +418,7 @@ function buildArgsFor(target: Target, builder: string): string[] {
       "hayate-cli",
     ];
   }
-  return [
-    "build",
-    "--release",
-    "--package",
-    "hayate-cli",
-    "--target",
-    target.triple,
-  ];
+  return ["build", "--release", "--package", "hayate-cli", "--target", target.triple];
 }
 
 async function stripBinary(path: string, target: Target): Promise<void> {
@@ -438,20 +433,14 @@ async function stripBinary(path: string, target: Target): Promise<void> {
   }
 }
 
-async function generateExtras(
-  binPath: string,
-  extrasDir: string,
-  verbose: boolean,
-): Promise<void> {
+async function generateExtras(binPath: string, extrasDir: string, verbose: boolean): Promise<void> {
   if (existsSync(extrasDir)) {
     rmSync(extrasDir, { recursive: true, force: true });
   }
   mkdirSync(extrasDir, { recursive: true });
 
   const completionsDir = join(extrasDir, "completions");
-  const manDir = join(extrasDir, "man");
   mkdirSync(completionsDir, { recursive: true });
-  mkdirSync(manDir, { recursive: true });
 
   const shells: [string, string][] = [
     ["bash", "hayate.bash"],
@@ -468,37 +457,14 @@ async function generateExtras(
       log(`  could not generate ${shell} completions: ${err}`);
     }
   }
-
-  const pages: [string, string][] = [
-    ["hayate", "hayate.1"],
-    ["send", "hayate-send.1"],
-    ["receive", "hayate-receive.1"],
-    ["discover", "hayate-discover.1"],
-    ["completions", "hayate-completions.1"],
-    ["man", "hayate-man.1"],
-  ];
-  for (const [page, filename] of pages) {
-    try {
-      const out = join(manDir, filename);
-      await captureToFile(binPath, ["man", page], out);
-    } catch (err) {
-      log(`  could not generate man page ${page}: ${err}`);
-    }
-  }
 }
 
 function copyExtras(extrasDir: string, staging: string): void {
   const completionsSrc = join(extrasDir, "completions");
-  const manSrc = join(extrasDir, "man");
   const completionsDst = join(staging, "completions");
-  const manDst = join(staging, "man");
   if (existsSync(completionsSrc)) {
     mkdirSync(completionsDst, { recursive: true });
     copyDirSync(completionsSrc, completionsDst);
-  }
-  if (existsSync(manSrc)) {
-    mkdirSync(manDst, { recursive: true });
-    copyDirSync(manSrc, manDst);
   }
 }
 
@@ -526,11 +492,7 @@ async function captureToFile(cmd: string, args: string[], outPath: string): Prom
   await Bun.write(outPath, output);
 }
 
-async function createArchive(
-  archivePath: string,
-  staging: string,
-  target: Target,
-): Promise<void> {
+async function createArchive(archivePath: string, staging: string, target: Target): Promise<void> {
   mkdirSync(dirname(archivePath), { recursive: true });
 
   if (target.archive === "tar.gz") {
@@ -544,14 +506,7 @@ async function createArchive(
     } else if (process.platform === "win32") {
       await run(
         "powershell",
-        [
-          "Compress-Archive",
-          "-Path",
-          `${staging}\\*`,
-          "-DestinationPath",
-          archivePath,
-          "-Force",
-        ],
+        ["Compress-Archive", "-Path", `${staging}\\*`, "-DestinationPath", archivePath, "-Force"],
         { cwd: staging },
       );
     } else {
@@ -591,14 +546,12 @@ async function buildDebPackage(
   const debianInstall = join(controlDir, "DEBIAN");
   const binInstall = join(controlDir, "usr", "bin");
   const shareDir = join(controlDir, "usr", "share");
-  const manDir = join(shareDir, "man", "man1");
   const completionDir = join(shareDir, "bash-completion", "completions");
   const fishDir = join(shareDir, "fish", "vendor_completions.d");
   const zshDir = join(shareDir, "zsh", "vendor-completions");
 
   mkdirSync(debianInstall, { recursive: true });
   mkdirSync(binInstall, { recursive: true });
-  mkdirSync(manDir, { recursive: true });
   mkdirSync(completionDir, { recursive: true });
   mkdirSync(fishDir, { recursive: true });
   mkdirSync(zshDir, { recursive: true });
@@ -606,12 +559,6 @@ async function buildDebPackage(
   copyFileSync(binPath, join(binInstall, "hayate"));
 
   if (extrasDir) {
-    const manSrc = join(extrasDir, "man");
-    if (existsSync(manSrc)) {
-      for (const entry of readdirSync(manSrc)) {
-        await Bun.write(join(manDir, entry), Bun.file(join(manSrc, entry)));
-      }
-    }
     const bash = join(extrasDir, "completions", "hayate.bash");
     if (existsSync(bash)) {
       await Bun.write(join(completionDir, "hayate"), Bun.file(bash));
@@ -626,9 +573,7 @@ async function buildDebPackage(
     }
   }
 
-  const deps = target.arch === "aarch64"
-    ? "libc6 (>= 2.31), zlib1g"
-    : "libc6 (>= 2.31), zlib1g";
+  const deps = "libc6 (>= 2.31), zlib1g";
 
   await Bun.write(
     join(debianInstall, "control"),
@@ -636,7 +581,7 @@ async function buildDebPackage(
 Version: ${version}
 Section: utils
 Priority: optional
-Architecture: ${target.arch === "aarch64" ? "arm64" : "amd64"}
+Architecture: ${debArch(target)}
 Depends: ${deps}
 Maintainer: ShiinaSaku <hayate@example.com>
 Description: Encrypted, compressed LAN file transfer tool
@@ -672,10 +617,7 @@ async function buildDebWithAr(controlDir: string, debPath: string): Promise<void
 
   const dataDir = join(controlDir, "usr");
   const dataTar = await tarEntries(dataDir);
-  await Bun.write(
-    join(tmp, "data.tar.gz"),
-    Buffer.from(await gzipAsync(dataTar, { level: 9 })),
-  );
+  await Bun.write(join(tmp, "data.tar.gz"), Buffer.from(await gzipAsync(dataTar, { level: 9 })));
 
   await run("ar", ["r", debPath, "debian-binary", "control.tar.gz", "data.tar.gz"], {
     cwd: tmp,
@@ -695,10 +637,7 @@ async function sha256(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function writeChecksums(
-  releaseDir: string,
-  artifacts: string[],
-): Promise<void> {
+async function writeChecksums(releaseDir: string, artifacts: string[]): Promise<void> {
   const sums = await Promise.all(
     artifacts.map(async (path) => {
       const sum = await sha256(path);
@@ -719,7 +658,7 @@ async function main() {
 
   mkdirSync(args.releaseDir, { recursive: true });
 
-  // Generate completions and man pages once using the native host binary.
+  // Generate shell completions once using the native host binary.
   let extrasDir: string | undefined;
   if (!args.skipExtras) {
     extrasDir = join(args.releaseDir, ".extras");
@@ -765,6 +704,7 @@ async function main() {
       args.releaseDir,
       args.verbose,
       args.skipExtras,
+      host,
       extrasDir,
       args.deb,
     );

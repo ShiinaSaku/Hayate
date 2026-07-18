@@ -35,7 +35,8 @@ pub enum EngineError {
     #[error("invalid passphrase: key exchange authentication failed")]
     InvalidPassphrase,
 
-    /// An error occurred during cryptographic operations (e.g. encryption/decryption/HKDF).
+    /// An error occurred during cryptographic operations (e.g.
+    /// encryption/decryption/HKDF).
     #[error("crypto error: {0}")]
     Crypto(&'static str),
 

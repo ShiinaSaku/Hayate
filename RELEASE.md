@@ -1,58 +1,88 @@
 # How to Release
 
-Hayate no longer uses release-plz or cargo-dist. Both were removed — a replacement release
-pipeline is TBD. Until then, releasing is manual.
+Hayate releases are driven by [Tegami](https://tegami.fuma-nama.dev). Merging a Tegami version PR bumps the workspace version, publishes the `hayate` library to crates.io, creates a GitHub release, and triggers a matrix workflow that builds and attaches binaries for Linux, macOS, Windows, and Android (Termux).
 
 ---
 
 ## Step by step
 
-### 1. Bump the version
+### 1. Write a changelog
 
-Both crates share one workspace version. Edit it by hand:
+Create a pending changelog file under `.tegami/` as `YYYY-MM-DD-{hash}.md`. The frontmatter must reference the `hayate` package (the library is the only published crate; `hayate-cli` is `publish = false`).
 
-```toml
-# Cargo.toml
-[workspace.package]
-version = "6.0.0"
+```md
+---
+packages:
+  "hayate": patch
+---
+
+### Fix discovery on networks with link-local addresses
+
+Pairing now works correctly when only link-local addresses are available.
 ```
 
-`hayate` and `hayate-cli` both use `version.workspace = true`, so they stay in lockstep
-automatically — one edit is enough.
+See the [Tegami changelog format](https://tegami.fuma-nama.dev/changelog) for details.
 
-### 2. Update the changelog
+### 2. Open the Tegami version PR
 
-Add a dated entry to `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`, grouped by
-`Added` / `Changed` / `Fixed` / `Security` as needed.
+Tegami computes the new version from the changelogs and opens a PR. Review it, then merge.
 
-### 3. Commit, tag, push
+### 3. Publish and release
+
+Merging the version PR triggers the `Publish` workflow (`.github/workflows/publish.yml`). It:
+
+- Publishes the `hayate` crate to crates.io.
+- Creates a GitHub release for `hayate@<version>`.
+
+### 4. Binary release
+
+The `release-binaries` workflow (`.github/workflows/release-binaries.yml`) runs on the release event and builds:
+
+| Target | Archive | Extras |
+| ------ | ------- | ------ |
+| `x86_64-unknown-linux-gnu` | `.tar.gz` | `.deb` |
+| `aarch64-unknown-linux-gnu` | `.tar.gz` | `.deb` |
+| `x86_64-apple-darwin` | `.tar.gz` | completions |
+| `aarch64-apple-darwin` | `.tar.gz` | completions |
+| `x86_64-pc-windows-msvc` | `.zip` | completions |
+| `aarch64-pc-windows-msvc` | `.zip` | completions |
+| `aarch64-linux-android` | `.tar.gz` | completions |
+| `x86_64-linux-android` | `.tar.gz` | completions |
+
+A final job aggregates all uploaded artifacts into `SHA256SUMS.txt` and re-uploads it.
+
+### 5. npm distribution
+
+The `npm` job in the same workflow downloads the release archives, repackages the native binary for each platform into a scoped npm package, and publishes:
+
+- `@shiinasaku/hayate` — the main CLI wrapper that installs the correct native binary as an optional dependency.
+- `@shiinasaku/hayate-darwin-x64` / `...arm64`
+- `@shiinasaku/hayate-linux-x64` / `...arm64`
+- `@shiinasaku/hayate-win32-x64` / `...arm64`
+- `@shiinasaku/hayate-android-x64` / `...arm64`
+
+After the release is published, users can install the CLI with:
 
 ```bash
-git commit -am "chore: release vX.Y.Z"
-git tag -a vX.Y.Z -m "vX.Y.Z"
-git push origin master --follow-tags
+npm install -g @shiinasaku/hayate
 ```
 
-### 4. Publish the library to crates.io
 
-Only `hayate` (the library) is published; `hayate-cli` has `publish = false`.
+---
 
-```bash
-cargo publish -p hayate
-```
+## Local release tooling
 
-### 5. Build and attach binaries (optional)
+Cross-platform binaries are built with `bun run build.ts`:
 
-No automated multi-platform build exists right now. To ship a binary for this machine's
-platform:
+- `bun run build` — native host target
+- `bun run build:all` — every target this host can reach
+- `bun run build:deb` — Linux targets plus `.deb` packages
+- `bun run build:android` — include Android (Termux) targets
+- `bun run build:everything` — all of the above
 
-```bash
-cargo build --release -p hayate-cli
-```
+Linux cross-compiles use `cargo-zigbuild`. Android builds prefer `cargo-ndk`; otherwise they fall back to the NDK linker scripts in `.cargo/config.toml`.
 
-The binary is at `target/release/hayate` (`hayate.exe` on Windows). Attach it manually to a
-GitHub Release if you want to distribute it, or skip this until the new release tooling is in
-place.
+Type-check the release scripts with `bun run typecheck`.
 
 ---
 
@@ -60,9 +90,10 @@ place.
 
 | Don't                          | Why                                                          |
 | ------------------------------ | ------------------------------------------------------------- |
-| Force-push or recreate a tag   | Same rule as before — tags should be append-only              |
-| Publish `hayate-cli`           | It's `publish = false` on purpose; only the library ships     |
-| Hand-edit `Cargo.lock` version | Run `cargo update -p hayate -p hayate-cli` after bumping instead |
+| Force-push or recreate a tag   | Tags should be append-only.                                   |
+| Publish `hayate-cli`           | It's `publish = false` on purpose; only the library ships.  |
+| Hand-edit `Cargo.lock` version | Run `cargo update -p hayate -p hayate-cli` after bumping.    |
+| Edit `.tegami/publish-lock.yaml` or package changelogs | Tegami owns these files.                                    |
 
 ---
 
@@ -75,5 +106,5 @@ version = "6.0.0"
 
 | Crate              | Published?             | Version source              |
 | ------------------ | ---------------------- | ---------------------------- |
-| `hayate` (lib)     | crates.io               | `workspace.package.version`  |
+| `hayate` (lib)     | crates.io              | `workspace.package.version`  |
 | `hayate-cli` (bin) | No (`publish = false`) | `workspace.package.version`  |

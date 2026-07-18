@@ -93,11 +93,7 @@ static POLICY: OnceLock<OutputPolicy> = OnceLock::new();
 /// Must be called once after `Cli::parse` (or `try_parse`) succeeds and before
 /// any subcommand runs. The policy is immutable after initialization.
 pub fn init(cli: &Cli) {
-    let _ = POLICY.set(OutputPolicy {
-        format: cli.format,
-        verbose: cli.verbose,
-        quiet: cli.quiet,
-    });
+    let _ = POLICY.set(OutputPolicy { format: cli.format, verbose: cli.verbose, quiet: cli.quiet });
 }
 
 /// Returns the process-wide output policy.
@@ -116,51 +112,19 @@ mod tests {
 
     #[test]
     fn no_progress_in_json_and_plain() {
-        assert!(
-            OutputPolicy {
-                format: OutputFormat::Json,
-                verbose: 0,
-                quiet: 0,
-            }
-            .no_progress()
-        );
-        assert!(
-            OutputPolicy {
-                format: OutputFormat::Plain,
-                verbose: 0,
-                quiet: 0,
-            }
-            .no_progress()
-        );
-        assert!(
-            !OutputPolicy {
-                format: OutputFormat::Pretty,
-                verbose: 0,
-                quiet: 0,
-            }
-            .no_progress()
-        );
+        assert!(OutputPolicy { format: OutputFormat::Json, verbose: 0, quiet: 0 }.no_progress());
+        assert!(OutputPolicy { format: OutputFormat::Plain, verbose: 0, quiet: 0 }.no_progress());
+        assert!(!OutputPolicy { format: OutputFormat::Pretty, verbose: 0, quiet: 0 }.no_progress());
     }
 
     #[test]
     fn quiet_suppresses_progress() {
-        assert!(
-            OutputPolicy {
-                format: OutputFormat::Pretty,
-                verbose: 0,
-                quiet: 1,
-            }
-            .no_progress()
-        );
+        assert!(OutputPolicy { format: OutputFormat::Pretty, verbose: 0, quiet: 1 }.no_progress());
     }
 
     #[test]
     fn verbosity_levels() {
-        let base = OutputPolicy {
-            format: OutputFormat::Pretty,
-            verbose: 0,
-            quiet: 0,
-        };
+        let base = OutputPolicy { format: OutputFormat::Pretty, verbose: 0, quiet: 0 };
         assert!(!base.debug());
         assert!(!base.info());
         assert!(base.normal());
@@ -175,11 +139,7 @@ mod tests {
 
     #[test]
     fn quiet_levels() {
-        let q1 = OutputPolicy {
-            format: OutputFormat::Pretty,
-            verbose: 0,
-            quiet: 1,
-        };
+        let q1 = OutputPolicy { format: OutputFormat::Pretty, verbose: 0, quiet: 1 };
         assert!(!q1.normal());
         assert!(!q1.silent_warnings());
 

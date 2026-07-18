@@ -56,13 +56,11 @@ fn bench_encrypt(bencher: Bencher, size: usize, cipher: u8) {
     let aead = AeadKey::new(&key, cipher).unwrap();
     let plaintext = vec![0xABu8; size];
 
-    bencher
-        .with_inputs(|| Vec::<u8>::with_capacity(size + 64))
-        .bench_refs(|buf| {
-            buf.clear();
-            let frame = crypto::encrypt_frame_with_key(&aead, &plaintext, buf).unwrap();
-            divan::black_box(frame.len())
-        });
+    bencher.with_inputs(|| Vec::<u8>::with_capacity(size + 64)).bench_refs(|buf| {
+        buf.clear();
+        let frame = crypto::encrypt_frame_with_key(&aead, &plaintext, buf).unwrap();
+        divan::black_box(frame.len())
+    });
 }
 
 /// Opens a pre-sealed frame of `size` bytes into a reused output buffer.
@@ -74,10 +72,8 @@ fn bench_decrypt(bencher: Bencher, size: usize, cipher: u8) {
     let mut frame = Vec::with_capacity(size + 64);
     crypto::encrypt_frame_with_key(&aead, &plaintext, &mut frame).unwrap();
 
-    bencher
-        .with_inputs(|| Vec::<u8>::with_capacity(size))
-        .bench_refs(|out| {
-            crypto::decrypt_frame_into_with_key(&aead, &frame, out).unwrap();
-            divan::black_box(out.len())
-        });
+    bencher.with_inputs(|| Vec::<u8>::with_capacity(size)).bench_refs(|out| {
+        crypto::decrypt_frame_into_with_key(&aead, &frame, out).unwrap();
+        divan::black_box(out.len())
+    });
 }

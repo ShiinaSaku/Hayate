@@ -4,10 +4,10 @@ default:
     @just --list
 
 fmt:
-    cargo fmt
+    cargo +nightly fmt
 
 fmt-check:
-    cargo fmt -- --check
+    cargo +nightly fmt -- --check
 
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
@@ -20,16 +20,19 @@ check: fmt-check clippy test
 build target="hayate":
     cargo build --release -p hayate-cli
 
-# Cross-compile for all desktop targets (requires appropriate linkers/toolchains)
+# Cross-compile for every target this host can reach.
+# Delegates to `bun run build.ts`, which handles zigbuild/ndk/linker setup
+# correctly (a bare `cargo build --target` fails on most dev machines).
 build-all:
-    cargo build --release --target x86_64-apple-darwin -p hayate-cli
-    cargo build --release --target aarch64-apple-darwin -p hayate-cli
-    cargo build --release --target x86_64-unknown-linux-gnu -p hayate-cli
-    cargo build --release --target x86_64-unknown-linux-musl -p hayate-cli
+    bun run build.ts --all
 
-# Windows cross-compile (requires mingw or MSVC toolchain)
+# Windows (and other non-host) cross-compiles via the build script.
 build-windows:
-    cargo build --release --target x86_64-pc-windows-msvc -p hayate-cli
+    bun run build.ts --target x86_64-pc-windows-msvc
+
+# Debian/Ubuntu .deb packages for Linux targets.
+build-deb:
+    bun run build.ts --all --deb
 
 android-aarch64:
     rustup target add aarch64-linux-android

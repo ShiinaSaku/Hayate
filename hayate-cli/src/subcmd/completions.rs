@@ -1,4 +1,5 @@
-//! `hayate completions` subcommand — prints or installs a shell completion script.
+//! `hayate completions` subcommand — prints or installs a shell completion
+//! script.
 
 use std::path::PathBuf;
 
@@ -10,8 +11,7 @@ use crate::cli::{Cli, CompletionsArgs};
 /// Generates a completion script for the requested shell.
 ///
 /// With `--install`, the script is written to the shell's default configuration
-/// directory (e.g. `~/.zshrc` or `~/.bashrc`). Without `--install`, it is
-/// printed to stdout.
+/// directory. Without `--install`, it is printed to stdout.
 pub fn run(args: CompletionsArgs) -> Result<()> {
     let mut cmd = Cli::command();
     let name = cmd.get_name().to_owned();
@@ -29,18 +29,53 @@ fn install(shell: &clap_complete::Shell, cmd: &mut clap::Command, name: &str) ->
     let mut buffer = Vec::new();
     clap_complete::generate(*shell, cmd, name, &mut buffer);
 
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("completion path has no parent"))?;
+    let parent = path.parent().ok_or_else(|| anyhow::anyhow!("completion path has no parent"))?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("failed to create directory {}", parent.display()))?;
     std::fs::write(&path, &buffer)
         .with_context(|| format!("failed to write completion script to {}", path.display()))?;
 
-    println!(
-        "   Completion script installed to {}\n   Restart your shell or source it to activate.",
-        path.display()
-    );
+    println!("Installed completions to {}", path.display());
+    println!();
+    match shell {
+        clap_complete::Shell::Bash => {
+            println!("Add this to ~/.bashrc (if not already present), then restart the shell:");
+            println!();
+            println!("  [ -f {} ] && . {}", path.display(), path.display());
+            println!();
+            println!("Or for this session only:");
+            println!();
+            println!("  eval \"$(hayate completions bash)\"");
+        },
+        clap_complete::Shell::Zsh => {
+            println!("Add this to ~/.zshrc (if not already present), then run `exec zsh`:");
+            println!();
+            println!("  fpath=({} $fpath)", parent.display());
+            println!("  autoload -Uz compinit && compinit");
+            println!();
+            println!("Or for this session only:");
+            println!();
+            println!("  eval \"$(hayate completions zsh)\"");
+        },
+        clap_complete::Shell::Fish => {
+            println!("Fish loads ~/.config/fish/completions/ automatically.");
+            println!("Open a new fish session, or run:");
+            println!();
+            println!("  source {}", path.display());
+        },
+        clap_complete::Shell::PowerShell => {
+            println!("Dot-source the script from your PowerShell profile:");
+            println!();
+            println!("  . \"{}\"", path.display());
+            println!();
+            println!("Find your profile path with:  echo $PROFILE");
+        },
+        _ => {
+            println!("Restart your shell to activate completions.");
+        },
+    }
+    println!();
+    println!("See also:  hayate docs completions");
     Ok(())
 }
 
@@ -49,11 +84,9 @@ fn completion_path(shell: &clap_complete::Shell) -> Result<PathBuf> {
     match shell {
         clap_complete::Shell::Bash => Ok(home.join(".bash_completion.d").join("hayate")),
         clap_complete::Shell::Zsh => Ok(home.join(".zsh").join("completions").join("_hayate")),
-        clap_complete::Shell::Fish => Ok(home
-            .join(".config")
-            .join("fish")
-            .join("completions")
-            .join("hayate.fish")),
+        clap_complete::Shell::Fish => {
+            Ok(home.join(".config").join("fish").join("completions").join("hayate.fish"))
+        },
         clap_complete::Shell::PowerShell => {
             #[cfg(target_os = "windows")]
             {
@@ -68,8 +101,8 @@ fn completion_path(shell: &clap_complete::Shell) -> Result<PathBuf> {
             {
                 bail!("PowerShell completion install is only supported on Windows");
             }
-        }
+        },
         clap_complete::Shell::Elvish => bail!("Elvish completion install is not supported"),
-        _ => bail!("completion install is not supported for {}", shell),
+        _ => bail!("completion install is not supported for {shell}"),
     }
 }

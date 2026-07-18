@@ -7,11 +7,9 @@
 //! filesystem traversal are synchronous. The extractor validates paths before
 //! unpacking entries and safely recreates hard links detected by the sender.
 
-use std::{
-    collections::HashMap,
-    io,
-    path::{Component, Path, PathBuf},
-};
+use std::collections::HashMap;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 
 use crate::EngineError;
 
@@ -127,11 +125,7 @@ fn relative_path_from_to(from_dir: &Path, to_path: &Path) -> PathBuf {
     let from: Vec<_> = from_dir.components().collect();
     let to: Vec<_> = to_path.components().collect();
 
-    let common = from
-        .iter()
-        .zip(to.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
+    let common = from.iter().zip(to.iter()).take_while(|(a, b)| a == b).count();
 
     let mut result = PathBuf::new();
     for _ in common..from.len() {
@@ -185,10 +179,8 @@ pub fn extract_tar_sync(input: impl io::Read, output_dir: &Path) -> Result<(), E
 
         if entry_type.is_hard_link() {
             // link_name() returns Option<Cow<Path>> — unwrap both layers.
-            let link_target = entry
-                .link_name()
-                .map_err(EngineError::Io)?
-                .ok_or(EngineError::PathTraversal)?;
+            let link_target =
+                entry.link_name().map_err(EngineError::Io)?.ok_or(EngineError::PathTraversal)?;
 
             // Validate the link target path.
             if link_target.is_absolute() {
@@ -250,12 +242,12 @@ fn normalize_path(path: &Path) -> PathBuf {
                 } else {
                     result.push("..");
                 }
-            }
-            Component::CurDir => {}
+            },
+            Component::CurDir => {},
             c => {
                 result.push(c);
                 depth += 1;
-            }
+            },
         }
     }
     result
@@ -293,11 +285,9 @@ pub fn estimate_dir_size(root_dir: &Path) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        io::Cursor,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::fs;
+    use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
 
@@ -326,10 +316,7 @@ mod tests {
         let out = temp_output("extract-root");
         let result = extract_tar_sync(Cursor::new(archive), &out);
         assert!(result.is_ok());
-        assert_eq!(
-            fs::read_to_string(out.join("nested/file.txt")).unwrap(),
-            "hello"
-        );
+        assert_eq!(fs::read_to_string(out.join("nested/file.txt")).unwrap(), "hello");
 
         fs::remove_dir_all(out).unwrap();
     }
@@ -418,9 +405,7 @@ mod tests {
             link_header.set_link_name("../../../etc/passwd").unwrap();
             link_header.set_size(0);
             link_header.set_cksum();
-            builder
-                .append(&link_header, Cursor::new(Vec::new()))
-                .unwrap();
+            builder.append(&link_header, Cursor::new(Vec::new())).unwrap();
             builder.finish().unwrap();
         }
 
@@ -462,10 +447,8 @@ mod tests {
 
     #[test]
     fn relative_path_from_to_parent_dir() {
-        let result = relative_path_from_to(
-            Path::new("target/debug/x"),
-            Path::new("target/debug/y/file"),
-        );
+        let result =
+            relative_path_from_to(Path::new("target/debug/x"), Path::new("target/debug/y/file"));
         assert_eq!(result, PathBuf::from("../y/file"));
     }
 
@@ -477,25 +460,16 @@ mod tests {
 
     #[test]
     fn normalize_path_removes_dot() {
-        assert_eq!(
-            normalize_path(Path::new("foo/./bar")),
-            PathBuf::from("foo/bar")
-        );
+        assert_eq!(normalize_path(Path::new("foo/./bar")), PathBuf::from("foo/bar"));
     }
 
     #[test]
     fn normalize_path_resolves_dotdot() {
-        assert_eq!(
-            normalize_path(Path::new("foo/bar/../baz")),
-            PathBuf::from("foo/baz")
-        );
+        assert_eq!(normalize_path(Path::new("foo/bar/../baz")), PathBuf::from("foo/baz"));
     }
 
     #[test]
     fn normalize_path_does_not_escape_root() {
-        assert_eq!(
-            normalize_path(Path::new("foo/../../baz")),
-            PathBuf::from("../baz")
-        );
+        assert_eq!(normalize_path(Path::new("foo/../../baz")), PathBuf::from("../baz"));
     }
 }

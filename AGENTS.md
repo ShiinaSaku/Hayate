@@ -23,13 +23,17 @@ before a release (see Release below).
 - Tests are plain `#[test]` (sync), even where the code under test is async — this repo has no
   `#[compio::test]` usage. Tests live inline in `#[cfg(test)] mod tests` blocks; there are no
   `tests/` directories.
-- `hayate/Cargo.toml` pins `rand_core = "0.6.4"` directly (see the comment there): `x25519-dalek`
-  2.x needs the old `CryptoRng` trait from 0.6, while the workspace's `rand = "0.10"` pulls
-  `rand_core` 0.10. Both versions coexist in `Cargo.lock` on purpose — don't try to unify them.
+- The engine uses `x25519-dalek` 3, which shares `rand_core` 0.10 with the workspace's
+  `rand = "0.10"`. System randomness now comes from `getrandom::SysRng` (wrapped via
+  `rand_core::UnwrapErr`) — `rand_core::OsRng` was removed in 0.10. No dual-version `rand_core`
+  pin is needed; keep both crates on the latest 0.10 line.
 
 ## Commands (run from workspace root; `just` orchestrates)
 
-- `just fmt` / `just fmt-check` — `cargo fmt` (`rustfmt.toml`: `style_edition = "2024"`)
+- `just fmt` / `just fmt-check` — `cargo +nightly fmt`. `rustfmt.toml` opts into nightly-only
+  options (`unstable_features`, `imports_granularity`, `wrap_comments`, …), so formatting
+  requires the nightly toolchain (`rustup component add rustfmt --toolchain nightly`); the CI
+  `fmt` job installs nightly for this reason.
 - `just clippy` — `cargo clippy --workspace --all-targets -- -D warnings` (also compiles
   `hayate/examples/*`)
 - `just test` — `cargo test --workspace` — **not** `--all-targets`, so examples aren't
@@ -55,17 +59,17 @@ fails.
 
 ## Architecture (`hayate/src/`)
 
-| Module         | Role                                                                    |
-| -------------- | ------------------------------------------------------------------------ |
-| `runner.rs`    | Public `HayateSender`/`HayateReceiver` builders — the real entrypoints |
-| `transfer.rs`  | Handshake state machine + chunked send/receive pipeline                |
-| `protocol.rs`  | Wire format: version negotiation, `Metadata`, frame encoding           |
-| `crypto.rs`    | X25519 ECDH, HKDF-SHA256, AEAD seal/open, cipher negotiation            |
-| `network.rs`   | QUIC endpoint setup, ephemeral TLS certs (`rcgen`)                     |
-| `discovery.rs` | mDNS + UDP-broadcast peer discovery                                     |
-| `pool.rs`      | `BufferPool` (flume-backed) for hot-path buffer reuse                  |
-| `tar.rs`       | Directory ⇄ tar streaming; extraction rejects abs paths/`..`/symlinks  |
-| `local_addr.rs`| Interface/subnet detection (`if-addrs`)                                |
+| Module          | Role                                                                   |
+| --------------- | ---------------------------------------------------------------------- |
+| `runner.rs`     | Public `HayateSender`/`HayateReceiver` builders — the real entrypoints |
+| `transfer.rs`   | Handshake state machine + chunked send/receive pipeline                |
+| `protocol.rs`   | Wire format: version negotiation, `Metadata`, frame encoding           |
+| `crypto.rs`     | X25519 ECDH, HKDF-SHA256, AEAD seal/open, cipher negotiation           |
+| `network.rs`    | QUIC endpoint setup, ephemeral TLS certs (`rcgen`)                     |
+| `discovery.rs`  | mDNS + UDP-broadcast peer discovery                                    |
+| `pool.rs`       | `BufferPool` (flume-backed) for hot-path buffer reuse                  |
+| `tar.rs`        | Directory ⇄ tar streaming; extraction rejects abs paths/`..`/symlinks  |
+| `local_addr.rs` | Interface/subnet detection (`if-addrs`)                                |
 
 `hayate-cli/` has no protocol logic of its own — it's clap parsing → library builder calls →
 `indicatif`/`console` progress UI.
@@ -129,7 +133,11 @@ Platform packages:
 - `@shiinasaku/hayate-win32-x64` / `@shiinasaku/hayate-win32-arm64`
 - `@shiinasaku/hayate-android-x64` / `@shiinasaku/hayate-android-arm64`
 
-The npm release script is `bun run npm:release`. It downloads the GitHub release archives, repackages the binary for each platform, and publishes the scoped packages. It requires `NPM_TOKEN` in GitHub secrets.
+The npm release script is `bun run npm:release`. It downloads the GitHub release archives plus
+`SHA256SUMS.txt`, verifies every archive's SHA-256 before repackaging (and rejects absolute /
+`..` paths inside archives), then publishes the scoped packages — with `--provenance`
+attestation when running in GitHub Actions. It requires `NPM_TOKEN` in GitHub secrets and the
+`id-token: write` permission (see the `npm` job in `release-binaries.yml`).
 
 ## TypeScript release scripts
 

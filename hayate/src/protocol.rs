@@ -102,7 +102,8 @@ pub struct Metadata {
     pub filename: String,
     /// Total bytes for a file transfer; 0 for directories (streaming, unknown).
     pub total_size: u64,
-    /// Transfer kind, either [`TransferKind::File`] or [`TransferKind::Directory`].
+    /// Transfer kind, either [`TransferKind::File`] or
+    /// [`TransferKind::Directory`].
     pub transfer_type: TransferKind,
     /// Hash algorithm used for payload integrity (e.g., "blake3", "sha256").
     pub hash_algo: String,
@@ -117,34 +118,43 @@ impl Metadata {
         transfer_type: TransferKind,
         hash_algo: String,
     ) -> Self {
-        Self {
-            filename,
-            total_size,
-            transfer_type,
-            hash_algo,
-        }
+        Self { filename, total_size, transfer_type, hash_algo }
     }
 
-    /// Validates metadata fields before they are encoded or used to route a payload.
+    /// Validates metadata fields before they are encoded or used to route a
+    /// payload.
     ///
-    /// This rejects empty or oversized names and oversized hash algorithm names.
+    /// This rejects empty or oversized names and any hash algorithm the engine
+    /// does not know how to compute and verify.
     #[inline]
     pub fn validate(&self) -> Result<(), crate::EngineError> {
         let name_len = self.filename.len();
-        if name_len.wrapping_sub(1) >= MAX_FILENAME_BYTES {
+        if name_len == 0 || name_len > MAX_FILENAME_BYTES {
             return Err(crate::EngineError::InvalidFrame(format!(
                 "invalid filename length: {name_len}"
             )));
         }
-        let algo_len = self.hash_algo.len();
-        if algo_len.wrapping_sub(1) >= 255 {
+        let algo = self.hash_algo.as_str();
+        if !is_known_hash_algo(algo) {
             return Err(crate::EngineError::InvalidFrame(format!(
-                "invalid hash algorithm length: {algo_len}"
+                "unsupported hash algorithm: {algo}"
             )));
         }
         Ok(())
     }
+}
 
+/// Hash algorithms the engine can compute and verify payload integrity.
+pub const KNOWN_HASH_ALGOS: &[&str] = &["blake3", "sha256"];
+
+/// Returns `true` if `algo` is a hash algorithm the engine supports.
+#[must_use]
+#[inline]
+pub fn is_known_hash_algo(algo: &str) -> bool {
+    KNOWN_HASH_ALGOS.contains(&algo)
+}
+
+impl Metadata {
     /// Serialises to the plaintext metadata blob.
     ///
     /// Callers should validate metadata before encoding it. Metadata decoded
@@ -165,9 +175,7 @@ impl Metadata {
     /// Deserialises from the plaintext metadata blob.
     pub fn decode(raw: &[u8]) -> Result<Self, crate::EngineError> {
         if raw.len() < 12 {
-            return Err(crate::EngineError::InvalidFrame(
-                "metadata too short".into(),
-            ));
+            return Err(crate::EngineError::InvalidFrame("metadata too short".into()));
         }
         let name_len = u16::from_be_bytes([raw[0], raw[1]]) as usize;
         if name_len == 0 || name_len > MAX_FILENAME_BYTES {
@@ -203,6 +211,11 @@ impl Metadata {
         let hash_algo = std::str::from_utf8(&raw[2 + name_len + 10..2 + name_len + 10 + algo_len])
             .map_err(|_| crate::EngineError::InvalidFrame("hash algorithm not UTF-8".into()))?
             .to_owned();
+        if !is_known_hash_algo(&hash_algo) {
+            return Err(crate::EngineError::InvalidFrame(format!(
+                "unsupported hash algorithm: {hash_algo}"
+            )));
+        }
 
         Ok(Self::new(filename, total_size, transfer_type, hash_algo))
     }
@@ -230,5 +243,22 @@ mod tests {
 
         let err = meta.validate().unwrap_err();
         assert!(matches!(err, crate::EngineError::InvalidFrame(_)));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_hash_algo() {
+        let meta = Metadata::new("file.bin".to_owned(), 0, TransferKind::File, "md5".to_owned());
+
+        let err = meta.validate().unwrap_err();
+        assert!(matches!(err, crate::EngineError::InvalidFrame(_)));
+    }
+
+    #[test]
+    fn validate_accepts_known_hash_algos() {
+        for algo in KNOWN_HASH_ALGOS {
+            let meta =
+                Metadata::new("file.bin".to_owned(), 0, TransferKind::File, (*algo).to_owned());
+            assert!(meta.validate().is_ok(), "expected {algo} to validate");
+        }
     }
 }

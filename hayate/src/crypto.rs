@@ -3,24 +3,23 @@
 //!
 //! ## Design notes
 //!
-//! * All AEAD key expansion happens via [`AeadKey::new`]. Build it **once**
-//!   per transfer; pass it to every frame operation with the `_with_key`
-//!   variants. The bare one-shot variants have been intentionally removed
-//!   to avoid accidentally paying key-expansion cost in the hot loop.
+//! * All AEAD key expansion happens via [`AeadKey::new`]. Build it **once** per
+//!   transfer; pass it to every frame operation with the `_with_key` variants.
+//!   The bare one-shot variants have been intentionally removed to avoid
+//!   accidentally paying key-expansion cost in the hot loop.
 //! * Nonces are generated with `ring`'s `SystemRandom` — the same CSPRNG
 //!   already in the dependency graph for AEAD.
 //! * HKDF is performed via `ring::hkdf` (ring already exposes it); the
 //!   standalone `hkdf` crate has been dropped.
 //! * Key derivation uses a random, public per-session salt sent on the wire and
-//!   a transcript-bound HKDF info string. A passphrase, when provided, is
-//!   mixed into the HKDF input keying material, not used as the salt.
+//!   a transcript-bound HKDF info string. A passphrase, when provided, is mixed
+//!   into the HKDF input keying material, not used as the salt.
 
-use rand_core::{OsRng, RngCore};
-use ring::{
-    aead::{Aad, LessSafeKey, Nonce, UnboundKey},
-    hkdf,
-    rand::{SecureRandom, SystemRandom},
-};
+use getrandom::SysRng;
+use rand_core::{Rng, UnwrapErr};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey};
+use ring::hkdf;
+use ring::rand::{SecureRandom, SystemRandom};
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use crate::EngineError;
@@ -89,9 +88,7 @@ impl AeadKey {
         let algo = cipher_algorithm(cipher_id)?;
         let unbound = UnboundKey::new(algo, key)
             .map_err(|_| EngineError::Crypto("failed to create UnboundKey"))?;
-        Ok(Self {
-            inner: LessSafeKey::new(unbound),
-        })
+        Ok(Self { inner: LessSafeKey::new(unbound) })
     }
 }
 
@@ -114,7 +111,7 @@ pub fn cipher_algorithm(cipher_id: u8) -> Result<&'static ring::aead::Algorithm,
 /// alive until [`derive_key`] consumes it.
 #[must_use]
 pub fn generate_keypair() -> (EphemeralSecret, [u8; PUBLIC_KEY_LEN]) {
-    let secret = EphemeralSecret::random_from_rng(OsRng);
+    let secret = EphemeralSecret::random_from_rng(&mut UnwrapErr(SysRng));
     let public = PublicKey::from(&secret);
     (secret, public.to_bytes())
 }
@@ -127,7 +124,7 @@ pub fn generate_keypair() -> (EphemeralSecret, [u8; PUBLIC_KEY_LEN]) {
 #[must_use]
 pub fn generate_salt() -> [u8; SALT_LEN] {
     let mut salt = [0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    UnwrapErr(SysRng).fill_bytes(&mut salt);
     salt
 }
 
@@ -221,8 +218,7 @@ pub fn derive_key(ctx: KeyDerivationContext<'_>) -> Result<[u8; 32], EngineError
         .expand(&info, hkdf::HKDF_SHA256)
         .map_err(|_| EngineError::Crypto("HKDF expand failed"))?;
     let mut key = [0u8; 32];
-    okm.fill(&mut key)
-        .map_err(|_| EngineError::Crypto("HKDF fill failed"))?;
+    okm.fill(&mut key).map_err(|_| EngineError::Crypto("HKDF fill failed"))?;
     Ok(key)
 }
 
@@ -240,9 +236,7 @@ pub fn encrypt_frame_with_key<'buf>(
 ) -> Result<&'buf [u8], EngineError> {
     // ring's SystemRandom is already in the dep graph for AEAD; no extra crate.
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    SystemRandom::new()
-        .fill(&mut nonce_bytes)
-        .map_err(|_| EngineError::Crypto("RNG failed"))?;
+    SystemRandom::new().fill(&mut nonce_bytes).map_err(|_| EngineError::Crypto("RNG failed"))?;
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
     let start = buf.len();
@@ -261,7 +255,8 @@ pub fn encrypt_frame_with_key<'buf>(
     Ok(&buf[start..])
 }
 
-/// Decrypts a frame produced by [`encrypt_frame_with_key`] into a reused buffer.
+/// Decrypts a frame produced by [`encrypt_frame_with_key`] into a reused
+/// buffer.
 ///
 /// This is the hot-path variant used by transfer workers that process
 /// thousands of frames with the same negotiated key. The output buffer is
@@ -364,10 +359,7 @@ mod tests {
             selected_cipher: CIPHER_CHACHA20,
         })
         .unwrap();
-        assert_eq!(
-            key1, key2,
-            "matching phrases and transcripts must yield the same key"
-        );
+        assert_eq!(key1, key2, "matching phrases and transcripts must yield the same key");
 
         // Mismatched phrases must produce different keys.
         let (sec3, pub3) = generate_keypair();
@@ -424,10 +416,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(key5, key6);
-        assert_ne!(
-            key1, key5,
-            "passphrase-derived must differ from no-passphrase"
-        );
+        assert_ne!(key1, key5, "passphrase-derived must differ from no-passphrase");
     }
 
     #[test]

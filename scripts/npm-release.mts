@@ -10,7 +10,7 @@
  * `--tag hayate@6.0.0`.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -24,14 +24,70 @@ interface Target {
 }
 
 const TARGETS: Target[] = [
-  { triple: "x86_64-apple-darwin", npmPkg: "@shiinasaku/hayate-darwin-x64", os: "darwin", cpu: "x64", archive: "tar.gz", binary: "hayate" },
-  { triple: "aarch64-apple-darwin", npmPkg: "@shiinasaku/hayate-darwin-arm64", os: "darwin", cpu: "arm64", archive: "tar.gz", binary: "hayate" },
-  { triple: "x86_64-unknown-linux-gnu", npmPkg: "@shiinasaku/hayate-linux-x64", os: "linux", cpu: "x64", archive: "tar.gz", binary: "hayate" },
-  { triple: "aarch64-unknown-linux-gnu", npmPkg: "@shiinasaku/hayate-linux-arm64", os: "linux", cpu: "arm64", archive: "tar.gz", binary: "hayate" },
-  { triple: "x86_64-pc-windows-msvc", npmPkg: "@shiinasaku/hayate-win32-x64", os: "win32", cpu: "x64", archive: "zip", binary: "hayate.exe" },
-  { triple: "aarch64-pc-windows-msvc", npmPkg: "@shiinasaku/hayate-win32-arm64", os: "win32", cpu: "arm64", archive: "zip", binary: "hayate.exe" },
-  { triple: "x86_64-linux-android", npmPkg: "@shiinasaku/hayate-android-x64", os: "android", cpu: "x64", archive: "tar.gz", binary: "hayate" },
-  { triple: "aarch64-linux-android", npmPkg: "@shiinasaku/hayate-android-arm64", os: "android", cpu: "arm64", archive: "tar.gz", binary: "hayate" },
+  {
+    triple: "x86_64-apple-darwin",
+    npmPkg: "@shiinasaku/hayate-darwin-x64",
+    os: "darwin",
+    cpu: "x64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
+  {
+    triple: "aarch64-apple-darwin",
+    npmPkg: "@shiinasaku/hayate-darwin-arm64",
+    os: "darwin",
+    cpu: "arm64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
+  {
+    triple: "x86_64-unknown-linux-gnu",
+    npmPkg: "@shiinasaku/hayate-linux-x64",
+    os: "linux",
+    cpu: "x64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
+  {
+    triple: "aarch64-unknown-linux-gnu",
+    npmPkg: "@shiinasaku/hayate-linux-arm64",
+    os: "linux",
+    cpu: "arm64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
+  {
+    triple: "x86_64-pc-windows-msvc",
+    npmPkg: "@shiinasaku/hayate-win32-x64",
+    os: "win32",
+    cpu: "x64",
+    archive: "zip",
+    binary: "hayate.exe",
+  },
+  {
+    triple: "aarch64-pc-windows-msvc",
+    npmPkg: "@shiinasaku/hayate-win32-arm64",
+    os: "win32",
+    cpu: "arm64",
+    archive: "zip",
+    binary: "hayate.exe",
+  },
+  {
+    triple: "x86_64-linux-android",
+    npmPkg: "@shiinasaku/hayate-android-x64",
+    os: "android",
+    cpu: "x64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
+  {
+    triple: "aarch64-linux-android",
+    npmPkg: "@shiinasaku/hayate-android-arm64",
+    os: "android",
+    cpu: "arm64",
+    archive: "tar.gz",
+    binary: "hayate",
+  },
 ];
 
 interface Args {
@@ -134,7 +190,11 @@ function resolveVersion(args: Args): string {
   fail("provide --version or --tag");
 }
 
-async function run(cmd: string, args: string[], options?: { cwd?: string; env?: Record<string, string | undefined> }): Promise<void> {
+async function run(
+  cmd: string,
+  args: string[],
+  options?: { cwd?: string; env?: Record<string, string | undefined> },
+): Promise<string> {
   const proc = Bun.spawn({
     cmd: [cmd, ...args],
     cwd: options?.cwd,
@@ -142,19 +202,27 @@ async function run(cmd: string, args: string[], options?: { cwd?: string; env?: 
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   const exit = await proc.exited;
   if (exit !== 0) {
     throw new Error(`${cmd} ${args.join(" ")} exited ${exit}\n${stdout}\n${stderr}`.trim());
   }
+  return stdout;
 }
 
+/** Downloads to a temp path then renames, so a killed run never leaves a
+ * half-written archive that a later `--skip-download` run would trust. */
 async function fetchArchive(url: string, dest: string): Promise<void> {
   log(`downloading ${url}`);
   const res = await fetch(url);
   if (!res.ok) fail(`failed to download ${url}: ${res.status} ${res.statusText}`);
   const buffer = await res.arrayBuffer();
-  await Bun.write(dest, buffer);
+  const tmp = `${dest}.tmp-${process.pid}`;
+  await Bun.write(tmp, buffer);
+  renameSync(tmp, dest);
 }
 
 async function sha256(filePath: string): Promise<string> {
@@ -169,13 +237,76 @@ async function sha256(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/** Rejects absolute paths and `..` traversal before extraction — downloaded
+ * archives are remote input and must not write outside `outDir`. */
+function assertSafeArchiveEntries(entries: string[], archivePath: string): void {
+  for (const entry of entries) {
+    const normalized = entry.replace(/\\/g, "/");
+    if (
+      normalized.startsWith("/") ||
+      /^[A-Za-z]:\//.test(normalized) ||
+      normalized.split("/").includes("..")
+    ) {
+      fail(`unsafe entry ${JSON.stringify(entry)} in ${archivePath}`);
+    }
+  }
+}
+
+async function listArchiveEntries(archivePath: string, target: Target): Promise<string[]> {
+  const output =
+    target.archive === "tar.gz"
+      ? await run("tar", ["-tzf", archivePath])
+      : await run("unzip", ["-Z1", archivePath]);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 async function extractArchive(archivePath: string, target: Target, outDir: string): Promise<void> {
+  assertSafeArchiveEntries(await listArchiveEntries(archivePath, target), archivePath);
   mkdirSync(outDir, { recursive: true });
   if (target.archive === "tar.gz") {
     await run("tar", ["-xzf", archivePath, "-C", outDir]);
   } else {
     await run("unzip", ["-q", archivePath, "-d", outDir]);
   }
+}
+
+/** Parses a `sha256sum`-format manifest (`<hex>  <name>` per line). */
+async function readChecksumManifest(path: string): Promise<Map<string, string>> {
+  const text = await Bun.file(path).text();
+  const sums = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const m = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/);
+    if (m?.[1] && m[2]) sums.set(m[2].trim(), m[1]);
+  }
+  if (sums.size === 0) fail(`no checksums parsed from ${path}`);
+  return sums;
+}
+
+async function fetchChecksumManifest(
+  repo: string,
+  tag: string,
+  archivesDir: string,
+): Promise<Map<string, string>> {
+  const dest = join(archivesDir, "SHA256SUMS.txt");
+  await fetchArchive(`https://github.com/${repo}/releases/download/${tag}/SHA256SUMS.txt`, dest);
+  return readChecksumManifest(dest);
+}
+
+async function verifyArchiveChecksum(
+  archivePath: string,
+  archiveName: string,
+  sums: Map<string, string>,
+): Promise<void> {
+  const expected = sums.get(archiveName);
+  if (!expected) fail(`no checksum for ${archiveName} in SHA256SUMS.txt`);
+  const actual = await sha256(archivePath);
+  if (actual !== expected) {
+    fail(`checksum mismatch for ${archiveName}: expected ${expected}, got ${actual}`);
+  }
+  log(`verified ${archiveName}`);
 }
 
 function findBinary(outDir: string, binaryName: string): string | undefined {
@@ -193,7 +324,12 @@ function findBinary(outDir: string, binaryName: string): string | undefined {
   return undefined;
 }
 
-async function buildPlatformPackage(target: Target, version: string, releaseDir: string, archivePath: string): Promise<string> {
+async function buildPlatformPackage(
+  target: Target,
+  version: string,
+  releaseDir: string,
+  archivePath: string,
+): Promise<string> {
   const workDir = join(releaseDir, "work", target.npmPkg);
   rmSync(workDir, { recursive: true, force: true });
   mkdirSync(workDir, { recursive: true });
@@ -208,6 +344,12 @@ async function buildPlatformPackage(target: Target, version: string, releaseDir:
   mkdirSync(pkgDir, { recursive: true });
 
   await Bun.write(join(pkgDir, target.binary), Bun.file(binPath));
+  // Bun.write does not preserve the source file's executable bit, so set it
+  // explicitly; without this the npm-installed binary fails with EACCES on
+  // Unix/Android.
+  if (target.os !== "win32") {
+    chmodSync(join(pkgDir, target.binary), 0o755);
+  }
 
   const template = JSON.parse(
     await Bun.file(join(import.meta.dir, "..", "npm", "pkg-template", "package.json")).text(),
@@ -233,7 +375,9 @@ async function buildMainPackage(version: string, releaseDir: string): Promise<st
   rmSync(pkgDir, { recursive: true, force: true });
   mkdirSync(pkgDir, { recursive: true });
 
-  const baseJson = JSON.parse(await Bun.file(join(import.meta.dir, "..", "npm", "hayate", "package.json")).text());
+  const baseJson = JSON.parse(
+    await Bun.file(join(import.meta.dir, "..", "npm", "hayate", "package.json")).text(),
+  );
   const optionalDependencies: Record<string, string> = {};
   for (const target of TARGETS) {
     optionalDependencies[target.npmPkg] = version;
@@ -245,10 +389,19 @@ async function buildMainPackage(version: string, releaseDir: string): Promise<st
   writeFileSync(join(pkgDir, "package.json"), JSON.stringify(baseJson, null, 2) + "\n", "utf8");
 
   // Copy wrapper files.
-  await Bun.write(join(pkgDir, "index.js"), Bun.file(join(import.meta.dir, "..", "npm", "hayate", "index.js")));
+  await Bun.write(
+    join(pkgDir, "index.js"),
+    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "index.js")),
+  );
   mkdirSync(join(pkgDir, "bin"), { recursive: true });
-  await Bun.write(join(pkgDir, "bin", "hayate.js"), Bun.file(join(import.meta.dir, "..", "npm", "hayate", "bin", "hayate.js")));
-  await Bun.write(join(pkgDir, "README.md"), Bun.file(join(import.meta.dir, "..", "npm", "hayate", "README.md")));
+  await Bun.write(
+    join(pkgDir, "bin", "hayate.js"),
+    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "bin", "hayate.js")),
+  );
+  await Bun.write(
+    join(pkgDir, "README.md"),
+    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "README.md")),
+  );
 
   return pkgDir;
 }
@@ -260,7 +413,10 @@ async function publishPackage(pkgDir: string, dryRun: boolean): Promise<void> {
     log("  dry-run: skipping npm publish");
     return;
   }
-  await run("npm", ["publish", "--access", "public"], { cwd: pkgDir });
+  const publishArgs = ["publish", "--access", "public"];
+  // Provenance attestation when publishing from GitHub Actions (OIDC).
+  if (process.env.GITHUB_ACTIONS === "true") publishArgs.push("--provenance");
+  await run("npm", publishArgs, { cwd: pkgDir });
 }
 
 async function main() {
@@ -277,6 +433,7 @@ async function main() {
   mkdirSync(archivesDir, { recursive: true });
 
   if (!args.skipDownload) {
+    const sums = await fetchChecksumManifest(args.repo, tag, archivesDir);
     for (const target of TARGETS) {
       const archiveName = `hayate-v${version}-${target.triple}.${target.archive}`;
       const archivePath = join(archivesDir, archiveName);
@@ -286,6 +443,7 @@ async function main() {
       } else {
         log(`using cached ${archivePath}`);
       }
+      await verifyArchiveChecksum(archivePath, archiveName, sums);
     }
   }
 
@@ -294,6 +452,16 @@ async function main() {
     const archiveName = `hayate-v${version}-${target.triple}.${target.archive}`;
     const archivePath = join(archivesDir, archiveName);
     if (!existsSync(archivePath)) fail(`archive not found: ${archivePath}`);
+    if (args.skipDownload) {
+      // With pre-seeded archives, verify against a local manifest if one was
+      // provided alongside them.
+      const sumsPath = join(archivesDir, "SHA256SUMS.txt");
+      if (existsSync(sumsPath)) {
+        await verifyArchiveChecksum(archivePath, archiveName, await readChecksumManifest(sumsPath));
+      } else {
+        log(`skip-download: no SHA256SUMS.txt for ${archiveName}, trusting local file`);
+      }
+    }
     const pkgDir = await buildPlatformPackage(target, version, releaseDir, archivePath);
     platformPkgDirs.push(pkgDir);
   }

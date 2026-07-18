@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
+import os from "node:os";
 
 /**
  * @typedef {Object} Target
@@ -32,12 +34,43 @@ const BINARY_NAMES = {
 };
 
 /**
+ * Detect whether the current process is running under Android (e.g. Termux).
+ *
+ * `process.platform` reports `linux` on Android, so extra signals are needed to
+ * distinguish it from a normal Linux host.
+ *
+ * @returns {boolean}
+ */
+export function isAndroid() {
+  if (process.platform !== "linux") return false;
+  if (process.env.ANDROID_ROOT || process.env.ANDROID_DATA) return true;
+  try {
+    return (
+      existsSync("/system/build.prop") ||
+      (typeof os.release === "function" && os.release().toLowerCase().includes("android"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Return the platform key for the current host, accounting for Android.
+ *
+ * @returns {string}
+ */
+function hostKey() {
+  if (isAndroid()) return `android-${process.arch}`;
+  return `${process.platform}-${process.arch}`;
+}
+
+/**
  * Return the npm package name for the current host platform/architecture.
  *
  * @returns {string}
  */
 export function pkgName() {
-  const key = `${process.platform}-${process.arch}`;
+  const key = hostKey();
   const target = TARGETS.find((t) => t.key === key);
   if (!target) {
     const supported = TARGETS.map((t) => t.key).join(", ");
@@ -60,7 +93,7 @@ export async function binaryPath() {
   const require = createRequire(import.meta.url);
   const pkgJsonPath = require.resolve(`${name}/package.json`);
   const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
-  const key = `${process.platform}-${process.arch}`;
+  const key = hostKey();
   const binary = pkgJson.binary ?? BINARY_NAMES[key];
   if (!binary) {
     throw new Error(`Unknown binary name for ${process.platform} ${process.arch}`);

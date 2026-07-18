@@ -1,7 +1,7 @@
 {
   "name": "hayate",
-  "type": "module",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "bun build.ts",
     "build:all": "bun build.ts --all",

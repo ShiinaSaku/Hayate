@@ -20,11 +20,10 @@
 //! receiver where to initiate the QUIC connection. Treat discovered addresses
 //! as untrusted until the X25519 + passphrase handshake succeeds.
 
-use std::{
-    io,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::{Duration, Instant},
-};
+use std::collections::HashSet;
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{Duration, Instant};
 
 /// mDNS service type for Hayate discovery.
 const MDNS_SERVICE_TYPE: &str = "_hayate._udp.local.";
@@ -45,7 +44,8 @@ pub struct DiscoveredPeer {
     pub rtt_ms: Option<f64>,
 }
 
-/// Computes SHA-256 of the phrase and returns the first 4 bytes as a hex string.
+/// Computes SHA-256 of the phrase and returns the first 4 bytes as a hex
+/// string.
 ///
 /// Used to derive a short, phrase-bound channel ID for mDNS TXT records and
 /// UDP broadcast packets. `ring` is already in the dep graph for AEAD, so no
@@ -83,10 +83,7 @@ impl BroadcasterGuard {
     /// and manages the lifecycle automatically.
     #[must_use]
     pub(crate) fn new(cancel_tx: flume::Sender<()>, mdns: mdns_sd::ServiceDaemon) -> Self {
-        Self {
-            cancel_tx: Some(cancel_tx),
-            mdns_handle: Some(mdns),
-        }
+        Self { cancel_tx: Some(cancel_tx), mdns_handle: Some(mdns) }
     }
 }
 
@@ -128,11 +125,8 @@ pub fn start_broadcaster_hybrid(
     let instance_name = format!("hayate-{channel_id}");
     let host_name = format!("hayate-{channel_id}.local.");
 
-    let txt_props: &[(&str, &str)] = &[
-        ("chid", channel_id),
-        ("os", os_name),
-        ("port", &port.to_string()),
-    ];
+    let txt_props: &[(&str, &str)] =
+        &[("chid", channel_id), ("os", os_name), ("port", &port.to_string())];
 
     let ip_str = crate::local_addr::primary_local_ipv4()
         .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string());
@@ -227,6 +221,7 @@ pub fn listen_for_broadcast(
             return;
         };
         let Ok(receiver) = mdns.browse(MDNS_SERVICE_TYPE) else {
+            let _ = mdns.shutdown();
             return;
         };
 
@@ -237,14 +232,9 @@ pub fn listen_for_broadcast(
             }
             if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                 for addr in info.get_addresses_v4() {
-                    let remote_chid = info
-                        .get_property_val_str("chid")
-                        .unwrap_or_default()
-                        .to_owned();
-                    let remote_os = info
-                        .get_property_val_str("os")
-                        .unwrap_or("unknown")
-                        .to_owned();
+                    let remote_chid =
+                        info.get_property_val_str("chid").unwrap_or_default().to_owned();
+                    let remote_os = info.get_property_val_str("os").unwrap_or("unknown").to_owned();
                     let remote_port = info.get_port();
 
                     let matches = match &target_cid_mdns {
@@ -282,9 +272,9 @@ pub fn listen_for_broadcast(
 
         let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), UDP_DISCOVERY_PORT);
         std_socket.bind(&socket2::SockAddr::from(listen_addr))?;
-        std_socket
-            .set_read_timeout(Some(Duration::from_millis(200)))
-            .unwrap_or(());
+        // Without a read timeout `recv_from` blocks forever and the main
+        // thread's `join()` would hang past the scan deadline.
+        std_socket.set_read_timeout(Some(Duration::from_millis(200)))?;
 
         let socket: std::net::UdpSocket = std_socket.into();
         let mut buf = [0u8; 1024];
@@ -301,19 +291,17 @@ pub fn listen_for_broadcast(
                         let _ = found_tx_udp.send(result);
                         return Ok(());
                     }
-                }
+                },
                 Err(ref e)
                     if e.kind() == io::ErrorKind::WouldBlock
-                        || e.kind() == io::ErrorKind::TimedOut => {}
+                        || e.kind() == io::ErrorKind::TimedOut => {},
                 Err(_) => break,
             }
         }
         Ok(())
     });
 
-    let adjusted_timeout = timeout
-        .checked_add(Duration::from_secs(2))
-        .unwrap_or(timeout);
+    let adjusted_timeout = timeout.checked_add(Duration::from_secs(2)).unwrap_or(timeout);
     if let Ok(result) = found_rx.recv_timeout(adjusted_timeout) {
         let _ = mdns_task.join();
         let _ = udp_task.join();
@@ -323,6 +311,117 @@ pub fn listen_for_broadcast(
         let _ = udp_task.join();
         Ok(None)
     }
+}
+
+/// Scans the local network for Hayate peers using mDNS and UDP broadcast.
+///
+/// Unlike [`listen_for_broadcast`], this does not filter by a passphrase and
+/// returns every peer discovered within `timeout`. It is the backing call for
+/// the `hayate discover` command: rather than probing every host on a subnet
+/// with a QUIC handshake, it passively collects the `HAYATE_PEER` UDP
+/// broadcasts and `_hayate._udp.local.` mDNS advertisements that Hayate peers
+/// emit while waiting to pair.
+///
+/// Peers are de-duplicated by socket address (a single peer advertises on both
+/// channels) and returned in discovery order.
+pub fn scan(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
+    // Unbounded: a bounded channel can deadlock `join()` below — a worker
+    // blocked in `send` on a full channel never observes its deadline once the
+    // main loop stops draining. Peer volume here is naturally rate-limited by
+    // the network, so unbounded buffering is safe.
+    let (found_tx, found_rx) = flume::unbounded::<DiscoveredPeer>();
+
+    // mDNS browser (background thread).
+    let found_tx_mdns = found_tx.clone();
+    let mdns_task = std::thread::spawn(move || {
+        let Ok(mdns) = mdns_sd::ServiceDaemon::new() else {
+            return;
+        };
+        let Ok(receiver) = mdns.browse(MDNS_SERVICE_TYPE) else {
+            let _ = mdns.shutdown();
+            return;
+        };
+        let deadline = Instant::now() + timeout;
+        while let Ok(event) = receiver.recv_timeout(Duration::from_millis(200)) {
+            if Instant::now() > deadline {
+                break;
+            }
+            if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
+                let remote_chid = info.get_property_val_str("chid").unwrap_or_default().to_owned();
+                let remote_os = info.get_property_val_str("os").unwrap_or("unknown").to_owned();
+                let remote_port = info.get_port();
+                for addr in info.get_addresses_v4() {
+                    let _ = found_tx_mdns.send(DiscoveredPeer {
+                        name: format!("mDNS:{remote_chid}"),
+                        addr: SocketAddr::new(IpAddr::V4(addr), remote_port),
+                        os: remote_os.clone(),
+                        rtt_ms: None,
+                    });
+                }
+            }
+        }
+        let _ = mdns.shutdown();
+    });
+
+    // UDP listener (background thread).
+    let found_tx_udp = found_tx;
+    let udp_task = std::thread::spawn(move || -> Result<(), io::Error> {
+        let std_socket = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::DGRAM,
+            Some(socket2::Protocol::UDP),
+        )?;
+        std_socket.set_reuse_address(true)?;
+        #[cfg(not(windows))]
+        std_socket.set_reuse_port(true)?;
+
+        let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), UDP_DISCOVERY_PORT);
+        std_socket.bind(&socket2::SockAddr::from(listen_addr))?;
+        // Without a read timeout `recv_from` blocks forever and the main
+        // thread's `join()` would hang past the scan deadline.
+        std_socket.set_read_timeout(Some(Duration::from_millis(200)))?;
+
+        let socket: std::net::UdpSocket = std_socket.into();
+        let mut buf = [0u8; 1024];
+        let deadline = Instant::now() + timeout;
+        while Instant::now() <= deadline {
+            match socket.recv_from(&mut buf) {
+                Ok((n, src_addr)) => {
+                    let data = &buf[..n];
+                    if let Ok(text) = std::str::from_utf8(data)
+                        && let Some(result) = parse_udp_packet(text, None, src_addr)
+                    {
+                        let (name, addr, os) = result;
+                        let _ = found_tx_udp.send(DiscoveredPeer { name, addr, os, rtt_ms: None });
+                    }
+                },
+                Err(ref e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut => {},
+                Err(_) => break,
+            }
+        }
+        Ok(())
+    });
+
+    let deadline = Instant::now() + timeout;
+    let mut seen = HashSet::new();
+    let mut peers = Vec::new();
+    while Instant::now() <= deadline {
+        match found_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(peer) => {
+                if seen.insert(peer.addr) {
+                    peers.push(peer);
+                }
+            },
+            Err(flume::RecvTimeoutError::Disconnected) => break,
+            Err(flume::RecvTimeoutError::Timeout) => {},
+        }
+    }
+
+    let _ = mdns_task.join();
+    let _ = udp_task.join();
+    Ok(peers)
 }
 
 /// Parses a UDP discovery packet: `HAYATE_PEER:v2:<ChannelID>:<OS>:<Port>`.
@@ -376,23 +475,10 @@ mod tests {
     #[test]
     fn derive_channel_id_is_exactly_8_lowercase_hex_chars() {
         // Use many phrases to maximise the chance of hitting a sub-0x10 first byte.
-        for phrase in [
-            "",
-            "a",
-            "abc",
-            "apple-bravo-charlie",
-            "x".repeat(200).as_str(),
-        ] {
+        for phrase in ["", "a", "abc", "apple-bravo-charlie", "x".repeat(200).as_str()] {
             let id = derive_channel_id(phrase);
-            assert_eq!(
-                id.len(),
-                8,
-                "derive_channel_id({phrase:?}) must be 8 chars, got {id:?}"
-            );
-            assert!(
-                id.chars().all(|c| c.is_ascii_hexdigit()),
-                "must be valid hex: {id}"
-            );
+            assert_eq!(id.len(), 8, "derive_channel_id({phrase:?}) must be 8 chars, got {id:?}");
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "must be valid hex: {id}");
             assert_eq!(id, id.to_lowercase(), "must be lowercase: {id}");
         }
     }
@@ -405,16 +491,17 @@ mod tests {
         assert_eq!(derive_channel_id(phrase), derive_channel_id(phrase));
     }
 
-    /// Different phrases must (with overwhelming probability) yield different IDs.
-    /// A collision here would allow impersonation attacks during pairing.
+    /// Different phrases must (with overwhelming probability) yield different
+    /// IDs. A collision here would allow impersonation attacks during
+    /// pairing.
     #[test]
     fn derive_channel_id_different_phrases_produce_different_ids() {
         assert_ne!(derive_channel_id("alpha"), derive_channel_id("beta"));
         assert_ne!(derive_channel_id("foo"), derive_channel_id("bar"));
     }
 
-    /// Known-vector test: SHA-256("") = e3b0c442…; first 4 bytes = [0xe3, 0xb0, 0xc4, 0x42].
-    /// The expected channel ID is "e3b0c442".
+    /// Known-vector test: SHA-256("") = e3b0c442…; first 4 bytes = [0xe3, 0xb0,
+    /// 0xc4, 0x42]. The expected channel ID is "e3b0c442".
     ///
     /// If `hex_encode` drops leading zeros this specific vector would still
     /// pass (all bytes ≥ 0x10), but it locks down the ring::digest integration

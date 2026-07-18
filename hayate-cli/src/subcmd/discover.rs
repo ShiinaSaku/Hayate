@@ -5,21 +5,18 @@
 //! streaming so peers appear as they are discovered rather than waiting for
 //! the full scan to complete.
 
-use std::{
-    collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::stream::{self, StreamExt};
 use hayate::local_addr;
 
-use crate::{cli::DiscoverArgs, output};
+use crate::cli::DiscoverArgs;
+use crate::output;
 
 const DEFAULT_PORT: u16 = 50001;
 const CONCURRENCY: usize = 128;
@@ -34,11 +31,8 @@ struct ProbeOutcome {
 }
 
 pub async fn run(args: DiscoverArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
-    let subnets = if let Some(cidr) = &args.cidr {
-        parse_cidr(cidr)?
-    } else {
-        detect_all_subnets()
-    };
+    let subnets =
+        if let Some(cidr) = &args.cidr { parse_cidr(cidr)? } else { detect_all_subnets() };
 
     if subnets.is_empty() {
         output::warn("No local subnets detected. Loopback only. Use --cidr to specify a subnet.");
@@ -78,10 +72,7 @@ pub async fn run(args: DiscoverArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     // Always scan loopback (same-machine multi-tab discovery)
     let has_loopback = targets.iter().any(|t| t.ip().is_loopback());
     if !has_loopback {
-        targets.push(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            DEFAULT_PORT,
-        ));
+        targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_PORT));
     }
 
     let total_targets = targets.len() as u64;
@@ -219,11 +210,7 @@ async fn probe_one_with_rtt(addr: SocketAddr, timeout: Duration) -> Option<Probe
     let result = compio::time::timeout(timeout, async move {
         let client_cfg = hayate::network::client_config().ok()?;
         let endpoint = hayate::network::bind_client().await.ok()?;
-        let conn = endpoint
-            .connect(addr, "hayate.local", Some(client_cfg))
-            .ok()?
-            .await
-            .ok()?;
+        let conn = endpoint.connect(addr, "hayate.local", Some(client_cfg)).ok()?.await.ok()?;
         conn.close(0u32.into(), b"discover");
         let elapsed = start.elapsed();
         Some(elapsed)
@@ -237,32 +224,17 @@ async fn probe_one_with_rtt(addr: SocketAddr, timeout: Duration) -> Option<Probe
             let rtt_ms = elapsed.as_secs_f64() * 1000.0;
             let ip = addr.ip();
             let is_local = ip.is_loopback() || local_addr::is_local_ip(ip);
-            let name = if is_local {
-                "Local Instance".to_owned()
-            } else {
-                "Hayate Peer".to_owned()
-            };
+            let name =
+                if is_local { "Local Instance".to_owned() } else { "Hayate Peer".to_owned() };
             let resolved_ip = if is_local {
-                local_addr::primary_local_ipv4()
-                    .map(IpAddr::V4)
-                    .unwrap_or(ip)
+                local_addr::primary_local_ipv4().map(IpAddr::V4).unwrap_or(ip)
             } else {
                 ip
             };
-            let os = if is_local {
-                std::env::consts::OS.to_owned()
-            } else {
-                "unknown".to_owned()
-            };
+            let os = if is_local { std::env::consts::OS.to_owned() } else { "unknown".to_owned() };
 
-            Some(ProbeOutcome {
-                addr,
-                name,
-                resolved_ip,
-                rtt_ms,
-                os,
-            })
-        }
+            Some(ProbeOutcome { addr, name, resolved_ip, rtt_ms, os })
+        },
         None => None,
     }
 }

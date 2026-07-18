@@ -8,19 +8,25 @@
 //! return type is `BufResult<T, B>` = `(Result<T, io::Error>, B)` where `B`
 //! is the buffer returned after the kernel is done with it.
 
-use futures_util::stream::{FuturesOrdered, StreamExt};
-use std::{collections::BTreeMap, io, path::Path, rc::Rc};
+use std::collections::BTreeMap;
+use std::io;
+use std::path::Path;
+use std::rc::Rc;
 
 use compio::buf::{IntoInner, IoBuf};
 use compio::io::{AsyncReadAt, AsyncReadExt, AsyncWriteAtExt, AsyncWriteExt};
+use futures_util::stream::{FuturesOrdered, StreamExt};
 
-use crate::{
-    EngineError, crypto,
-    protocol::{
-        CHUNK_SIZE, FRAME_RAW, FRAME_ZSTD, MAX_METADATA_ENCRYPTED, Metadata, PROTOCOL_VERSION,
-        TransferKind,
-    },
+use crate::protocol::{
+    CHUNK_SIZE,
+    FRAME_RAW,
+    FRAME_ZSTD,
+    MAX_METADATA_ENCRYPTED,
+    Metadata,
+    PROTOCOL_VERSION,
+    TransferKind,
 };
+use crate::{EngineError, crypto};
 
 // ---------------------------------------------------------------------------
 // Non-blocking Payload Sources and Sinks
@@ -80,12 +86,10 @@ impl PayloadHasher {
     fn new(algo: &str) -> Result<Self, EngineError> {
         match algo {
             "blake3" => Ok(Self::Blake3(Box::new(blake3::Hasher::new()))),
-            "sha256" => Ok(Self::Sha256(Box::new(ring::digest::Context::new(
-                &ring::digest::SHA256,
-            )))),
-            _ => Err(EngineError::InvalidFrame(format!(
-                "unknown hash algorithm: {algo}"
-            ))),
+            "sha256" => {
+                Ok(Self::Sha256(Box::new(ring::digest::Context::new(&ring::digest::SHA256))))
+            },
+            _ => Err(EngineError::InvalidFrame(format!("unknown hash algorithm: {algo}"))),
         }
     }
 
@@ -93,10 +97,10 @@ impl PayloadHasher {
         match self {
             Self::Blake3(h) => {
                 h.update(data);
-            }
+            },
             Self::Sha256(h) => {
                 h.update(data);
-            }
+            },
         }
     }
 
@@ -138,21 +142,21 @@ async fn read_u32<S: AsyncReadExt + Unpin>(stream: &mut S) -> Result<u32, Engine
 
 /// Write a `u32` to the stream.
 async fn write_u32<S: AsyncWriteExt + Unpin>(stream: &mut S, v: u32) -> Result<(), EngineError> {
-    write_all_owned(stream, v.to_be_bytes().to_vec())
-        .await
-        .map(|_| ())
+    write_all_owned(stream, v.to_be_bytes().to_vec()).await.map(|_| ())
 }
 
 /// Performs the cryptographic version check, key exchange, cipher negotiation,
-/// and metadata handshake on the sender side using separate write and read streams.
+/// and metadata handshake on the sender side using separate write and read
+/// streams.
 ///
-/// This is particularly useful for protocols like QUIC that split connections into
-/// separate unidirectional streams.
+/// This is particularly useful for protocols like QUIC that split connections
+/// into separate unidirectional streams.
 ///
 /// # Errors
 ///
-/// Returns [`EngineError`] if version mismatch, key exchange derivation, cipher negotiation,
-/// or encryption/decryption fails, or if the receiver rejects the transfer.
+/// Returns [`EngineError`] if version mismatch, key exchange derivation, cipher
+/// negotiation, or encryption/decryption fails, or if the receiver rejects the
+/// transfer.
 pub async fn handshake_sender_split<W, R>(
     send: &mut W,
     recv: &mut R,
@@ -192,9 +196,7 @@ where
     let cipher_bytes = read_exact_n(recv, 1).await?;
     let selected_cipher = cipher_bytes[0];
     if selected_cipher != crypto::CIPHER_CHACHA20 && selected_cipher != crypto::CIPHER_AES256_GCM {
-        return Err(EngineError::Handshake(
-            "Unknown cipher suite selected by receiver".into(),
-        ));
+        return Err(EngineError::Handshake("Unknown cipher suite selected by receiver".into()));
     }
 
     let key = crypto::derive_key(crypto::KeyDerivationContext {
@@ -218,22 +220,21 @@ where
     match consent[0] {
         0x01 => Ok((key, selected_cipher)),
         0x00 => Err(EngineError::TransferRejected),
-        other => Err(EngineError::InvalidFrame(format!(
-            "unexpected consent byte 0x{other:02x}"
-        ))),
+        other => Err(EngineError::InvalidFrame(format!("unexpected consent byte 0x{other:02x}"))),
     }
 }
 
 /// Performs the cryptographic version check, key exchange, cipher negotiation,
-/// and metadata handshake on the receiver side using separate write and read streams.
+/// and metadata handshake on the receiver side using separate write and read
+/// streams.
 ///
-/// This is particularly useful for protocols like QUIC that split connections into
-/// separate unidirectional streams.
+/// This is particularly useful for protocols like QUIC that split connections
+/// into separate unidirectional streams.
 ///
 /// # Errors
 ///
-/// Returns [`EngineError`] if version mismatch, key exchange derivation, cipher negotiation,
-/// or encryption/decryption fails.
+/// Returns [`EngineError`] if version mismatch, key exchange derivation, cipher
+/// negotiation, or encryption/decryption fails.
 pub async fn handshake_receiver_split<W, R>(
     send: &mut W,
     recv: &mut R,
@@ -247,16 +248,11 @@ where
     let ver_cap = read_exact_n(recv, 3).await?;
     let remote_ver = u16::from_be_bytes([ver_cap[0], ver_cap[1]]);
     if remote_ver != PROTOCOL_VERSION {
-        return Err(EngineError::ProtocolMismatch {
-            local: PROTOCOL_VERSION,
-            remote: remote_ver,
-        });
+        return Err(EngineError::ProtocolMismatch { local: PROTOCOL_VERSION, remote: remote_ver });
     }
     let sender_cap = ver_cap[2];
     if sender_cap != crypto::CIPHER_CHACHA20 && sender_cap != crypto::CIPHER_AES256_GCM {
-        return Err(EngineError::Handshake(
-            "Unknown cipher capability sent by sender".into(),
-        ));
+        return Err(EngineError::Handshake("Unknown cipher capability sent by sender".into()));
     }
 
     let selected_cipher =
@@ -293,9 +289,7 @@ where
     // 4. Metadata
     let enc_len = read_u32(recv).await? as usize;
     if enc_len == 0 || enc_len > MAX_METADATA_ENCRYPTED {
-        return Err(EngineError::InvalidFrame(format!(
-            "invalid metadata length: {enc_len}"
-        )));
+        return Err(EngineError::InvalidFrame(format!("invalid metadata length: {enc_len}")));
     }
     let enc = read_exact_n(recv, enc_len).await?;
     let plain = match crypto::decrypt_metadata(&key, selected_cipher, &enc) {
@@ -305,7 +299,7 @@ where
                 return Err(EngineError::InvalidPassphrase);
             }
             return Err(e);
-        }
+        },
     };
     let meta = Metadata::decode(&plain)?;
     Ok(((key, selected_cipher), meta))
@@ -316,9 +310,7 @@ pub async fn send_consent<S>(stream: &mut S, accept: bool) -> Result<(), EngineE
 where
     S: compio::io::AsyncWrite + Unpin,
 {
-    write_all_owned(stream, vec![u8::from(accept)])
-        .await
-        .map(|_| ())
+    write_all_owned(stream, vec![u8::from(accept)]).await.map(|_| ())
 }
 
 // ---------------------------------------------------------------------------
@@ -327,14 +319,14 @@ where
 
 /// Encrypts and transmits a payload source (file or channel) to the receiver.
 ///
-/// Chunks of [`crate::protocol::CHUNK_SIZE`] are read from the source, compressed
-/// (if requested and the file extension suggests it is beneficial), encrypted with the
-/// negotiated AEAD cipher, and written to the stream.
+/// Chunks of [`crate::protocol::CHUNK_SIZE`] are read from the source,
+/// compressed (if requested and the file extension suggests it is beneficial),
+/// encrypted with the negotiated AEAD cipher, and written to the stream.
 ///
 /// # Errors
 ///
-/// Returns [`EngineError`] if reading from source, compressing, encrypting, or writing
-/// to the network fails.
+/// Returns [`EngineError`] if reading from source, compressing, encrypting, or
+/// writing to the network fails.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_payload<S>(
     key: &[u8; 32],
@@ -349,13 +341,15 @@ pub async fn send_payload<S>(
 where
     S: compio::io::AsyncWrite + Unpin,
 {
+    if !crate::protocol::is_known_hash_algo(hash_algo) {
+        return Err(EngineError::InvalidFrame(format!("unsupported hash algorithm: {hash_algo}")));
+    }
+
     // Compression is counterproductive for formats that are already entropy
     // coded; avoid burning CPU and expanding payloads for those extensions.
     let mut do_compress = compress;
     let ext_opt = if compress {
-        filename
-            .and_then(|name| std::path::Path::new(name).extension())
-            .and_then(|s| s.to_str())
+        filename.and_then(|name| std::path::Path::new(name).extension()).and_then(|s| s.to_str())
     } else {
         None
     };
@@ -423,20 +417,16 @@ where
                             }
                             hasher.update(&buf[..n]);
 
-                            if chunk_tx
-                                .send_async(Ok((index, buf, n, true)))
-                                .await
-                                .is_err()
-                            {
+                            if chunk_tx.send_async(Ok((index, buf, n, true))).await.is_err() {
                                 break;
                             }
                             index += 1;
-                        }
+                        },
                         Err(e) => {
                             pool_clone.release(buf);
                             let _ = chunk_tx.send_async(Err(e)).await;
                             break;
-                        }
+                        },
                     }
 
                     if !file_ended {
@@ -454,7 +444,7 @@ where
                 while let Some((_, buf, _)) = reads.next().await {
                     pool_clone.release(buf);
                 }
-            }
+            },
             PayloadSource::Channel(rx) => {
                 while let Ok(res) = rx.recv_async().await {
                     match res {
@@ -464,22 +454,18 @@ where
                             }
                             hasher.update(&data);
                             let len = data.len();
-                            if chunk_tx
-                                .send_async(Ok((index, data, len, false)))
-                                .await
-                                .is_err()
-                            {
+                            if chunk_tx.send_async(Ok((index, data, len, false))).await.is_err() {
                                 break;
                             }
                             index += 1;
-                        }
+                        },
                         Err(e) => {
                             let _ = chunk_tx.send_async(Err(e)).await;
                             break;
-                        }
+                        },
                     }
                 }
-            }
+            },
         }
 
         let hash = hasher.finalize(&algo);
@@ -509,7 +495,7 @@ where
                 Err(e) => {
                     let _ = result_tx.send(Err(e));
                     return;
-                }
+                },
             };
             // Reusable zstd compressor: built once per worker, like
             // `aead_key` above, instead of `zstd::encode_all` constructing a
@@ -523,7 +509,7 @@ where
                     Err(e) => {
                         let _ = result_tx.send(Err(EngineError::Compression(e.to_string())));
                         return;
-                    }
+                    },
                 }
             } else {
                 None
@@ -539,7 +525,7 @@ where
                     Err(e) => {
                         let _ = result_tx.send(Err(EngineError::Io(e)));
                         break;
-                    }
+                    },
                 };
 
                 let chunk_data = &chunk[..chunk_len];
@@ -552,16 +538,16 @@ where
                         Ok(n) if n < chunk_len => {
                             plain_buf.push(FRAME_ZSTD);
                             plain_buf.extend_from_slice(&scratch[..n]);
-                        }
+                        },
                         Ok(_) => {
                             // Compression didn't help this chunk; send it raw.
                             plain_buf.push(FRAME_RAW);
                             plain_buf.extend_from_slice(chunk_data);
-                        }
+                        },
                         Err(e) => {
                             let _ = result_tx.send(Err(EngineError::Compression(e.to_string())));
                             break;
-                        }
+                        },
                     }
                 } else {
                     plain_buf.push(FRAME_RAW);
@@ -581,11 +567,11 @@ where
                         if result_tx.send(Ok((index, enc_buf, chunk_len))).is_err() {
                             break;
                         }
-                    }
+                    },
                     Err(e) => {
                         let _ = result_tx.send(Err(e));
                         break;
-                    }
+                    },
                 }
             }
         });
@@ -612,10 +598,7 @@ where
     }
 
     let hash = hash_rx.recv_async().await.map_err(|_| {
-        EngineError::Io(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "hasher task exited prematurely",
-        ))
+        EngineError::Io(io::Error::new(io::ErrorKind::BrokenPipe, "hasher task exited prematurely"))
     })?;
 
     Ok(hash)
@@ -625,15 +608,16 @@ where
 // Receive payload
 // ---------------------------------------------------------------------------
 
-/// Receives, decrypts, and extracts a payload from a stream, saving it to `output_path`.
+/// Receives, decrypts, and extracts a payload from a stream, saving it to
+/// `output_path`.
 ///
-/// Handles decryption, decompression (zstd), size validation, and safe path extraction
-/// for directory transfers.
+/// Handles decryption, decompression (zstd), size validation, and safe path
+/// extraction for directory transfers.
 ///
 /// # Errors
 ///
-/// Returns [`EngineError`] if reading from stream, decrypting, decompressing, writing to
-/// target file/directory, or size validation fails.
+/// Returns [`EngineError`] if reading from stream, decrypting, decompressing,
+/// writing to target file/directory, or size validation fails.
 #[allow(clippy::too_many_arguments)]
 struct FileCleanupGuard<'a> {
     path: &'a Path,
@@ -644,6 +628,7 @@ impl<'a> FileCleanupGuard<'a> {
     fn new(path: &'a Path) -> Self {
         Self { path, active: true }
     }
+
     fn disable(&mut self) {
         self.active = false;
     }
@@ -657,15 +642,16 @@ impl Drop for FileCleanupGuard<'_> {
     }
 }
 
-/// Receives, decrypts, and extracts a payload from a stream, saving it to `output_path`.
+/// Receives, decrypts, and extracts a payload from a stream, saving it to
+/// `output_path`.
 ///
-/// Handles decryption, decompression (zstd), size validation, and safe path extraction
-/// for directory transfers.
+/// Handles decryption, decompression (zstd), size validation, and safe path
+/// extraction for directory transfers.
 ///
 /// # Errors
 ///
-/// Returns [`EngineError`] if reading from stream, decrypting, decompressing, writing to
-/// target file/directory, or size validation fails.
+/// Returns [`EngineError`] if reading from stream, decrypting, decompressing,
+/// writing to target file/directory, or size validation fails.
 #[allow(clippy::too_many_arguments)]
 pub async fn receive_payload<S>(
     key: &[u8; 32],
@@ -685,6 +671,9 @@ where
             "invalid transfer type: 0x{:02x}",
             transfer_type.as_u8()
         )));
+    }
+    if !crate::protocol::is_known_hash_algo(hash_algo) {
+        return Err(EngineError::InvalidFrame(format!("unsupported hash algorithm: {hash_algo}")));
     }
 
     let pool = crate::pool::BufferPool::new(32, CHUNK_SIZE + 1024);
@@ -713,7 +702,7 @@ where
                             Ok(chunk) => {
                                 self.buf = chunk;
                                 self.pos = 0;
-                            }
+                            },
                             Err(_) => return Ok(0),
                         }
                     }
@@ -735,12 +724,7 @@ where
                 }
             }
             crate::tar::extract_tar_sync(
-                ChanReader {
-                    rx,
-                    buf: Vec::new(),
-                    pos: 0,
-                    pool: pool_clone,
-                },
+                ChanReader { rx, buf: Vec::new(), pos: 0, pool: pool_clone },
                 &out,
             )
         }))
@@ -750,9 +734,7 @@ where
 
     let mut cleanup_guard = None;
     let mut sink = if transfer_type == TransferKind::File {
-        let f = compio::fs::File::create(output_path)
-            .await
-            .map_err(EngineError::Io)?;
+        let f = compio::fs::File::create(output_path).await.map_err(EngineError::Io)?;
         cleanup_guard = Some(FileCleanupGuard::new(output_path));
         PayloadSink::File { file: f, pos: 0 }
     } else {
@@ -780,7 +762,7 @@ where
                 Err(e) => {
                     let _ = plain_tx.send(Err(e));
                     return;
-                }
+                },
             };
             // Reusable zstd decompressor: built once per worker, like
             // `aead_key` above, instead of `zstd::decode_all` constructing a
@@ -790,7 +772,7 @@ where
                 Err(e) => {
                     let _ = plain_tx.send(Err(EngineError::Compression(e.to_string())));
                     return;
-                }
+                },
             };
             let mut decrypted_buf = Vec::with_capacity(CHUNK_SIZE + 256);
             while let Ok(res) = enc_rx.recv() {
@@ -799,7 +781,7 @@ where
                     Err(e) => {
                         let _ = plain_tx.send(Err(EngineError::Io(e)));
                         break;
-                    }
+                    },
                 };
                 let decrypt_res =
                     crypto::decrypt_frame_into_with_key(&aead_key, &enc, &mut decrypted_buf);
@@ -821,7 +803,7 @@ where
                                 plain.resize(data.len(), 0);
                                 plain.copy_from_slice(data);
                                 Ok(plain)
-                            }
+                            },
                             FRAME_ZSTD => {
                                 // Lease from the same pool FRAME_RAW uses so
                                 // every plaintext buffer reaching the writer
@@ -837,9 +819,9 @@ where
                                     Err(e) => {
                                         plain_pool_clone.release(plain);
                                         Err(EngineError::Compression(e.to_string()))
-                                    }
+                                    },
                                 }
-                            }
+                            },
                             other => Err(EngineError::InvalidFrame(format!(
                                 "unknown frame flag 0x{other:02x}"
                             ))),
@@ -849,17 +831,17 @@ where
                                 if plain_tx.send(Ok((index, plain))).is_err() {
                                     break;
                                 }
-                            }
+                            },
                             Err(e) => {
                                 let _ = plain_tx.send(Err(e));
                                 break;
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(e) => {
                         let _ = plain_tx.send(Err(e));
                         break;
-                    }
+                    },
                 }
             }
         });
@@ -894,7 +876,7 @@ where
                         result.map_err(EngineError::Io)?;
                         pos += plaintext_len;
                         plain_pool_clone.release(buffer);
-                    }
+                    },
                     PayloadSink::Channel(tx) => {
                         tx.send_async(plaintext).await.map_err(|_| {
                             EngineError::Io(io::Error::new(
@@ -902,7 +884,7 @@ where
                                 "extractor thread exited",
                             ))
                         })?;
-                    }
+                    },
                 }
                 progress_cb(total)?;
                 next_index += 1;
@@ -940,9 +922,7 @@ where
             // Directory transfer. The metadata size is an estimate of file contents,
             // not the tar stream size; allow tar header/padding overhead but
             // cap the total to prevent a runaway peer from filling the disk.
-            let max_dir_size = expected_size
-                .saturating_mul(4)
-                .saturating_add(64 * 1024 * 1024);
+            let max_dir_size = expected_size.saturating_mul(4).saturating_add(64 * 1024 * 1024);
             if total > max_dir_size {
                 return Err(EngineError::Io(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -978,12 +958,12 @@ where
         let compio::BufResult(result, len_buf) = stream.read_exact(len_buf_owned).await;
         len_buf_owned = len_buf;
         match result {
-            Ok(()) => {}
+            Ok(()) => {},
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
             Err(e) => {
                 read_error = Some(e);
                 break;
-            }
+            },
         }
         let frame_len = u32::from_be_bytes([
             len_buf_owned[0],
@@ -992,9 +972,10 @@ where
             len_buf_owned[3],
         ]) as usize;
 
-        // Max frame = flag (1) + encrypted chunk (CHUNK_SIZE + zstd worst case + nonce + tag).
-        // Use a precise cap instead of an arbitrary 64 MiB constant to prevent a malformed
-        // peer from forcing a large allocation before AEAD authentication runs.
+        // Max frame = flag (1) + encrypted chunk (CHUNK_SIZE + zstd worst case + nonce
+        // + tag). Use a precise cap instead of an arbitrary 64 MiB constant to
+        // prevent a malformed peer from forcing a large allocation before AEAD
+        // authentication runs.
         let max_frame_len = 1
             + 4
             + CHUNK_SIZE
@@ -1020,11 +1001,11 @@ where
                     break;
                 }
                 current_index += 1;
-            }
+            },
             Err(e) => {
                 read_error = Some(e);
                 break;
-            }
+            },
         }
     }
 
@@ -1035,9 +1016,7 @@ where
     drop(enc_tx);
 
     let hash = write_handle.await.map_err(|e| {
-        EngineError::Io(io::Error::other(format!(
-            "receive writer task failed: {e:?}"
-        )))
+        EngineError::Io(io::Error::other(format!("receive writer task failed: {e:?}")))
     })??;
 
     if let Some(mut guard) = cleanup_guard {
@@ -1066,17 +1045,7 @@ pub async fn send_payload_write(
     hash_algo: &str,
     progress_cb: impl FnMut(u64) -> Result<(), EngineError> + Send + 'static,
 ) -> Result<String, EngineError> {
-    send_payload(
-        key,
-        cipher_id,
-        source,
-        stream,
-        compress,
-        filename,
-        hash_algo,
-        progress_cb,
-    )
-    .await
+    send_payload(key, cipher_id, source, stream, compress, filename, hash_algo, progress_cb).await
 }
 
 /// Receives the payload using a split `compio_quic::RecvStream`.
@@ -1108,7 +1077,8 @@ pub async fn receive_payload_split(
     .await
 }
 
-/// Writes the consent byte (accept/reject) to a split `compio_quic::SendStream`.
+/// Writes the consent byte (accept/reject) to a split
+/// `compio_quic::SendStream`.
 ///
 /// # Errors
 ///
@@ -1226,15 +1196,11 @@ mod tests {
 
         let original = b"hello world, hayate hayate hayate! ".repeat(10_000);
 
-        let n = compressor
-            .compress_to_buffer(&original[..], &mut scratch)
-            .unwrap();
+        let n = compressor.compress_to_buffer(&original[..], &mut scratch).unwrap();
         assert!(n < original.len(), "repetitive input must compress smaller");
 
         let mut plain = pool.lease_sync();
-        let m = decompressor
-            .decompress_to_buffer(&scratch[..n], &mut plain)
-            .unwrap();
+        let m = decompressor.decompress_to_buffer(&scratch[..n], &mut plain).unwrap();
         plain.truncate(m);
 
         assert_eq!(plain, original, "decompressed output must match the input");
@@ -1262,17 +1228,13 @@ mod tests {
         let mut scratch = vec![0u8; zstd::zstd_safe::compress_bound(CHUNK_SIZE)];
 
         let chunk = b"repetitive payload chunk ".repeat(50_000);
-        let n = compressor
-            .compress_to_buffer(&chunk[..], &mut scratch)
-            .unwrap();
+        let n = compressor.compress_to_buffer(&chunk[..], &mut scratch).unwrap();
 
         // Simulate 50 frames worth of decode+release with the pool capped
         // far below that count — proves steady-state reuse, not growth.
         for _ in 0..50 {
             let mut plain = pool.lease_sync();
-            let m = decompressor
-                .decompress_to_buffer(&scratch[..n], &mut plain)
-                .unwrap();
+            let m = decompressor.decompress_to_buffer(&scratch[..n], &mut plain).unwrap();
             plain.truncate(m);
             assert_eq!(plain, chunk);
             pool.release(plain);

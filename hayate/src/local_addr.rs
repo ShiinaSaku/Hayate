@@ -1,9 +1,10 @@
-//! Utilities for resolving and querying local network interface addresses and subnets.
+//! Utilities for resolving and querying local network interface addresses and
+//! subnets.
 //!
-//! This module helps library users discover local IPv4 and IPv6 addresses on active
-//! network interfaces without requiring manual network configuration. It combines
-//! operating system interface queries with UDP socket route probes to find the most
-//! reliable local address candidates.
+//! This module helps library users discover local IPv4 and IPv6 addresses on
+//! active network interfaces without requiring manual network configuration. It
+//! combines operating system interface queries with UDP socket route probes to
+//! find the most reliable local address candidates.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
@@ -11,10 +12,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 ///
 /// This function queries network interfaces using operating-system APIs,
 /// checks active routing tables, and initiates UDP socket connection probes to
-/// compile a list of all IPv4 addresses that can be used for direct local communication.
+/// compile a list of all IPv4 addresses that can be used for direct local
+/// communication.
 ///
-/// Duplicate entries are filtered, and loopback, multicast, or unroutable addresses
-/// are excluded.
+/// Duplicate entries are filtered, and loopback, multicast, or unroutable
+/// addresses are excluded.
 ///
 /// # Examples
 ///
@@ -39,10 +41,12 @@ pub fn local_ipv4s() -> Vec<Ipv4Addr> {
     ips
 }
 
-/// Retrieves a list of the base network addresses (subnets) for all local interfaces.
+/// Retrieves a list of the base network addresses (subnets) for all local
+/// interfaces.
 ///
-/// The returned `Ipv4Addr`s represent the subnet prefix (e.g. `192.168.1.0` for `192.168.1.45`),
-/// which is useful for scanning or network discovery tasks on local networks.
+/// The returned `Ipv4Addr`s represent the subnet prefix (e.g. `192.168.1.0` for
+/// `192.168.1.45`), which is useful for scanning or network discovery tasks on
+/// local networks.
 ///
 /// # Examples
 ///
@@ -87,7 +91,8 @@ pub fn primary_local_ipv4() -> Option<Ipv4Addr> {
     local_ipv4s().into_iter().next()
 }
 
-/// Checks if a given IP address belongs to one of the local machine's active network interfaces.
+/// Checks if a given IP address belongs to one of the local machine's active
+/// network interfaces.
 ///
 /// Supports both IPv4 and IPv6 checks.
 ///
@@ -103,9 +108,7 @@ pub fn primary_local_ipv4() -> Option<Ipv4Addr> {
 #[must_use]
 pub fn is_local_ip(ip: IpAddr) -> bool {
     if let Ok(ifaces) = if_addrs::get_if_addrs() {
-        return ifaces
-            .into_iter()
-            .any(|iface| !iface.is_loopback() && iface.ip() == ip);
+        return ifaces.into_iter().any(|iface| !iface.is_loopback() && iface.ip() == ip);
     }
     false
 }
@@ -129,7 +132,8 @@ fn interface_ipv4s() -> Vec<Ipv4Addr> {
     ips
 }
 
-/// Performs active UDP connection probes to common targets to deduce the local routing IP.
+/// Performs active UDP connection probes to common targets to deduce the local
+/// routing IP.
 fn route_probe_ipv4s() -> Vec<Ipv4Addr> {
     let mut ips = Vec::new();
     let probes = [

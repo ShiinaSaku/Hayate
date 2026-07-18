@@ -1,6 +1,6 @@
 pub mod completions;
 pub mod discover;
-pub mod man;
+pub mod docs;
 pub mod receive;
 pub mod send;
 
@@ -19,6 +19,6 @@ pub async fn dispatch(cli: Cli, cancelled: Arc<AtomicBool>) -> Result<()> {
         Command::Send(args) => send::run(args, cancelled).await,
         Command::Discover(args) => discover::run(args, cancelled).await,
         Command::Completions(args) => completions::run(args),
-        Command::Man(args) => man::run(args),
+        Command::Docs(args) => docs::run(args),
     }
 }

@@ -13,12 +13,12 @@
 //!
 //! 1. [`BufferPool::release`] never needs to block — there is always a free
 //!    slot waiting for it — so it is safe to call from the single-threaded
-//!    compio executor (see the crate-level threading rule in `AGENTS.md`:
-//!    never block that thread).
+//!    compio executor (see the crate-level threading rule in `AGENTS.md`: never
+//!    block that thread).
 //! 2. [`BufferPool::lease_sync`]'s blocking `recv()` provides real
 //!    backpressure: a producer thread that's outrunning its consumer parks
-//!    instead of allocating a throwaway buffer, so memory use stays flat
-//!    under sustained load instead of thrashing the allocator.
+//!    instead of allocating a throwaway buffer, so memory use stays flat under
+//!    sustained load instead of thrashing the allocator.
 //!
 //! **If you add a new code path that produces a buffer destined for
 //! `release()`, it must call `lease()`/`lease_sync()` first**, even if the
@@ -62,11 +62,7 @@ impl BufferPool {
             // Pre-warm; errors only if capacity == 0.
             let _ = tx.send(vec![0u8; buffer_size]);
         }
-        Self {
-            tx,
-            rx,
-            buffer_size,
-        }
+        Self { tx, rx, buffer_size }
     }
 
     /// Leases a buffer from the pool asynchronously.
@@ -75,10 +71,7 @@ impl BufferPool {
     /// once a buffer is returned via [`BufferPool::release`].
     #[inline]
     pub async fn lease(&self) -> Vec<u8> {
-        self.rx
-            .recv_async()
-            .await
-            .unwrap_or_else(|_| vec![0u8; self.buffer_size])
+        self.rx.recv_async().await.unwrap_or_else(|_| vec![0u8; self.buffer_size])
     }
 
     /// Leases a buffer from the pool, blocking the calling thread until one
@@ -95,9 +88,7 @@ impl BufferPool {
     #[inline]
     #[must_use]
     pub fn lease_sync(&self) -> Vec<u8> {
-        self.rx
-            .recv()
-            .unwrap_or_else(|_| vec![0u8; self.buffer_size])
+        self.rx.recv().unwrap_or_else(|_| vec![0u8; self.buffer_size])
     }
 
     /// Releases a buffer back to the pool.
@@ -124,8 +115,9 @@ impl BufferPool {
 
 #[cfg(test)]
 mod tests {
-    use super::BufferPool;
     use std::time::Duration;
+
+    use super::BufferPool;
 
     // ── lease_sync / release invariant ─────────────────────────────────────
     //

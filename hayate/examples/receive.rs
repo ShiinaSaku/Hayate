@@ -1,21 +1,19 @@
-//! Standalone example demonstrating how to receive files programmatically using `HayateReceiver`.
+//! Standalone example demonstrating how to receive files programmatically using
+//! `HayateReceiver`.
 //!
 //! Run this example with:
 //! ```bash
 //! cargo run --example receive [port]
 //! ```
 
-use hayate::runner::HayateReceiver;
 use std::net::SocketAddr;
+
+use hayate::runner::HayateReceiver;
 
 #[compio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let port = if args.len() > 1 {
-        args[1].parse::<u16>()?
-    } else {
-        50001
-    };
+    let port = if args.len() > 1 { args[1].parse::<u16>()? } else { 50001 };
 
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Listening for incoming Hayate connections on {bind_addr}...");

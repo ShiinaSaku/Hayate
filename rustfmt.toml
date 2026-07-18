@@ -1,1 +1,25 @@
+# Nightly rustfmt features (requires `cargo +nightly fmt`; CI installs nightly
+# for the fmt job — see .github/workflows/ci.yml and the justfile).
+unstable_features = true
 style_edition = "2024"
+max_width = 100
+
+# Layout & Spacing
+use_small_heuristics = "Max"
+fn_single_line = false
+where_single_line = false
+reorder_impl_items = true # Alphabetically orders items inside impls
+
+# Imports management
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+imports_layout = "HorizontalVertical"
+
+# Idiomatic Cleanup
+use_field_init_shorthand = true
+merge_derives = false
+match_block_trailing_comma = true
+
+# Comments & Docs
+normalize_comments = true
+wrap_comments = true

@@ -1,218 +1,217 @@
 //! `hayate receive` subcommand.
 
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use compio_quic::ConnectionError as QuicConnectionError;
-use hayate::{
-    EngineError, local_addr, network,
-    protocol::{Metadata, TransferKind},
-    transfer,
-};
+use hayate::protocol::{Metadata, TransferKind};
+use hayate::{EngineError, HayateReceiver, TransferStage, is_benign_peer_close, local_addr};
+use indicatif::ProgressBar;
 
-use crate::{cli::ReceiveArgs, output, policy};
+use crate::cli::ReceiveArgs;
+use crate::{output, policy};
 
 pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     // ESC / q listener — polls tty in raw mode, exits cleanly via cancelled flag.
     spawn_esc_listener(Arc::clone(&cancelled));
 
-    if let Some(code) = &args.code {
-        // ── Pairing-code mode ────────────────────────────────────────
-        output::stage("pairing", format!("scanning for code \"{code}\""));
-        let spinner = if args.no_progress {
-            None
-        } else {
-            Some(output::spinner(
-                "Discovering",
-                "listening for sender broadcast…",
-            ))
-        };
+    if let Some(code) = args.code.clone() {
+        return run_pairing(code, args, cancelled).await;
+    }
 
-        if cancelled.load(Ordering::SeqCst) {
-            bail!("cancelled");
-        }
+    run_listen(args, cancelled).await
+}
 
-        let peer_addr = match hayate::discovery::listen_for_broadcast(
-            Some(code.as_str()),
-            Duration::from_secs(60),
-        )? {
-            Some((_name, addr, _os)) => {
-                if let Some(s) = &spinner {
-                    s.finish_and_clear();
-                }
-                addr
-            }
-            None => {
-                if let Some(s) = &spinner {
-                    s.finish_and_clear();
-                }
-                bail!("Timed out waiting for sender broadcast.");
-            }
-        };
+// ---------------------------------------------------------------------------
+// Pairing-code mode (one-shot)
+// ---------------------------------------------------------------------------
 
-        output::stage("connect", format!("dialing sender at {peer_addr}"));
-        let endpoint = network::bind_client().await?;
-        let client_config = network::client_config()?;
-        let spinner = if args.no_progress {
-            None
-        } else {
-            Some(output::spinner("Connecting", &peer_addr.to_string()))
-        };
-        let conn_result: Result<_> =
-            match endpoint.connect(peer_addr, "hayate.local", Some(client_config)) {
-                Ok(connecting) => connecting
-                    .await
-                    .context("Failed to establish QUIC connection to the sender"),
-                Err(e) => Err(e.into()),
-            };
-        if let Some(spinner) = &spinner {
-            spinner.finish_and_clear();
-        }
-        let conn = conn_result?;
+async fn run_pairing(code: String, args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
+    if cancelled.load(Ordering::SeqCst) {
+        bail!("cancelled");
+    }
 
-        let peer = conn.remote_address();
-        output::ok(&format!("Connected to {peer}"));
+    let spinner: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+    let progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+    let no_progress = args.no_progress || policy::get().no_progress();
+    let auto_accept = args.auto_accept;
+    let output_dir = args.output.clone();
+    let transfer_start = Arc::new(Mutex::new(None));
+    let prompt_error: Arc<Mutex<Option<anyhow::Error>>> = Arc::new(Mutex::new(None));
 
-        let (mut send_stream, mut recv_stream) = conn
-            .accept_bi()
-            .await
-            .context("Failed to accept bidirectional streams from sender")?;
+    let spinner_s = Arc::clone(&spinner);
+    let progress_s = Arc::clone(&progress);
+    let cancelled_stage = Arc::clone(&cancelled);
+    let cancelled_progress = Arc::clone(&cancelled);
+    let transfer_start_stage = Arc::clone(&transfer_start);
 
-        // ── Handshake ────────────────────────────────────────────────
-        output::stage("handshake", "negotiating cipher…");
-        let ((key, cipher_id), meta) = transfer::handshake_receiver_split(
-            &mut send_stream,
-            &mut recv_stream,
-            Some(code.as_str()),
-        )
-        .await
-        .context("Handshake cipher negotiation failed")?;
+    let mut builder = HayateReceiver::new().code(code);
+    if auto_accept {
+        builder = builder.auto_accept(true);
+    }
 
-        // ── Transfer offer card ──────────────────────────────────────
-        let kind = if meta.transfer_type == TransferKind::Directory {
-            "directory"
-        } else {
-            "file"
-        };
-        output::print_transfer_offer(
-            &meta.filename,
-            meta.total_size,
-            kind,
-            peer,
-            output::cipher_name(cipher_id),
-            &meta.hash_algo,
-        );
-
-        let dest = if args.auto_accept {
-            Some(resolve_output(&args.output, &meta))
-        } else {
-            let result = output::suspend_for_prompt(|| prompt_accept(&meta, peer, &args.output));
-            result?
-        };
-
-        let accept = dest.is_some();
-        if cancelled.load(Ordering::SeqCst) {
-            bail!("cancelled");
-        }
-        transfer::send_consent_write(&mut send_stream, accept)
-            .await
-            .context("Failed to send transfer acceptance to peer")?;
-        if !accept {
-            output::warn("Transfer rejected.");
-            conn.close(0u32.into(), b"rejected");
-            return Ok(());
-        }
-        let dest = dest.unwrap();
-
-        // ── Receive ──────────────────────────────────────────────────
-        output::stage("receive", &meta.filename);
-        output::key_value("output", dest.display());
-        let start = Instant::now();
-
-        let pb = if args.no_progress || meta.total_size == 0 || policy::get().no_progress() {
-            None
-        } else {
-            let pb = output::transfer_progress_bar("receive", meta.total_size);
-            Some(pb)
-        };
-
-        let pb_clone = pb.clone();
-        let cancelled_clone = Arc::clone(&cancelled);
-        let checksum_result = transfer::receive_payload_split(
-            &key,
-            cipher_id,
-            &mut recv_stream,
-            &dest,
-            meta.transfer_type,
-            meta.total_size,
-            &meta.hash_algo,
-            move |bytes| {
-                if cancelled_clone.load(Ordering::SeqCst) {
+    let outcome = builder
+        .receive_with(
+            &output_dir,
+            move |stage| {
+                if cancelled_stage.load(Ordering::SeqCst) {
                     return Err(EngineError::Cancelled("transfer cancelled by user".into()));
                 }
-                if let Some(pb) = &pb_clone {
-                    output::set_transfer_position(pb, bytes);
+                match stage {
+                    TransferStage::Discovering { code } => {
+                        output::stage("pairing", format!("scanning for code \"{code}\""));
+                        if !no_progress {
+                            *spinner_s.lock().unwrap() = Some(output::spinner(
+                                "Discovering",
+                                "listening for sender broadcast…",
+                            ));
+                        }
+                    },
+                    TransferStage::Connecting { peer } => {
+                        clear_spinner(&spinner_s);
+                        output::stage("connect", format!("dialing sender at {peer}"));
+                        if !no_progress {
+                            *spinner_s.lock().unwrap() =
+                                Some(output::spinner("Connecting", &peer.to_string()));
+                        }
+                    },
+                    TransferStage::Connected { peer } => {
+                        clear_spinner(&spinner_s);
+                        output::ok(&format!("Connected to {peer}"));
+                    },
+                    TransferStage::Handshaking => {
+                        output::stage("handshake", "negotiating cipher…");
+                    },
+                    TransferStage::Offer { meta, cipher_id, peer } => {
+                        let kind = if meta.transfer_type == TransferKind::Directory {
+                            "directory"
+                        } else {
+                            "file"
+                        };
+                        output::print_transfer_offer(
+                            &meta.filename,
+                            meta.total_size,
+                            kind,
+                            peer,
+                            output::cipher_name(cipher_id),
+                            &meta.hash_algo,
+                        );
+                    },
+                    TransferStage::Transferring { filename, total_size } => {
+                        *transfer_start_stage.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(Instant::now());
+                        output::stage("receive", &filename);
+                        if !no_progress && total_size > 0 {
+                            *progress_s.lock().unwrap() =
+                                Some(output::transfer_progress_bar("receive", total_size));
+                        }
+                    },
+                    TransferStage::Finishing
+                    | TransferStage::WaitingForPeer
+                    | TransferStage::Pairing { .. }
+                    | TransferStage::Ready { .. } => {},
+                    _ => {},
                 }
                 Ok(())
             },
+            {
+                let output_dir = output_dir.clone();
+                let prompt_error = Arc::clone(&prompt_error);
+                move |meta, peer| {
+                    if auto_accept {
+                        return Some(resolve_output(&output_dir, meta));
+                    }
+                    match output::suspend_for_prompt(|| prompt_accept(meta, peer, &output_dir)) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            *prompt_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(e);
+                            None
+                        },
+                    }
+                }
+            },
+            {
+                let progress = Arc::clone(&progress);
+                move |bytes| {
+                    if cancelled_progress.load(Ordering::SeqCst) {
+                        return Err(EngineError::Cancelled("transfer cancelled by user".into()));
+                    }
+                    if let Some(pb) = progress.lock().unwrap().as_ref() {
+                        output::set_transfer_position(pb, bytes);
+                    }
+                    Ok(())
+                }
+            },
         )
-        .await
-        .context("File transfer failed during payload delivery");
+        .await;
 
-        if let Some(pb) = &pb {
-            output::finish_transfer_progress(pb, meta.total_size);
-        }
+    clear_spinner(&spinner);
 
-        let checksum = checksum_result?;
-
-        let elapsed = start.elapsed().as_secs_f64();
-        output::print_transfer_summary(
-            &meta.filename,
-            meta.total_size,
-            elapsed,
-            &checksum,
-            false,
-            output::cipher_name(cipher_id),
-        );
-
-        // Finish our send stream to signal the sender we're done, then
-        // close the connection gracefully.
-        let _ = send_stream.finish();
-        compio::time::sleep(std::time::Duration::from_millis(200)).await;
-        conn.close(0u32.into(), b"complete");
-        return Ok(());
+    match outcome {
+        Ok(outcome) => {
+            if let Some(pb) = progress.lock().unwrap().take() {
+                output::finish_transfer_progress(&pb, outcome.meta.total_size);
+            }
+            output::key_value("output", outcome.path.display());
+            let elapsed = transfer_start
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .map_or(0.0, |start| start.elapsed().as_secs_f64());
+            output::print_transfer_summary(
+                &outcome.meta.filename,
+                outcome.meta.total_size,
+                elapsed,
+                &outcome.checksum,
+                false,
+                output::cipher_name(outcome.cipher_id),
+            );
+            Ok(())
+        },
+        Err(EngineError::TransferRejected) => {
+            if let Some(error) = prompt_error.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                return Err(error).context("receive prompt failed");
+            }
+            output::warn("Transfer rejected.");
+            Ok(())
+        },
+        Err(EngineError::Cancelled(_)) => {
+            clear_progress(&progress);
+            bail!("cancelled");
+        },
+        Err(e) => {
+            clear_progress(&progress);
+            Err(e).context("receive failed")
+        },
     }
+}
 
-    // ── Direct listener mode ─────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Direct listener mode (multi-accept loop)
+// ---------------------------------------------------------------------------
+
+async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     let bind_addr = SocketAddr::new(args.bind, args.port);
-    let endpoint = network::bind_server(bind_addr).await?;
-    let local_port = endpoint.local_addr()?.port();
+    let mut builder = HayateReceiver::new().bind(bind_addr);
+    if args.auto_accept {
+        builder = builder.auto_accept(true);
+    }
+    let listener = builder.listen().await.context("Failed to bind listener")?;
+    let local_port = listener.local_addr()?.port();
 
     if bind_addr.ip().is_unspecified() {
-        // Single bound line + compact interface table so the user knows
-        // which addresses peers can connect to, without looking like we
-        // started multiple servers.
         output::print_bound(format!("0.0.0.0:{local_port}"));
         let ips = local_addr::local_ipv4s();
         if !ips.is_empty() {
             let addrs_with_names: Vec<_> = ips
                 .into_iter()
                 .map(|ip| {
-                    // Try to find the interface name for each IP.
                     let name = if_addrs::get_if_addrs()
                         .ok()
                         .and_then(|ifaces| {
-                            ifaces
-                                .into_iter()
-                                .find(|iface| iface.ip() == std::net::IpAddr::V4(ip))
+                            ifaces.into_iter().find(|iface| iface.ip() == std::net::IpAddr::V4(ip))
                         })
                         .map(|iface| iface.name)
                         .unwrap_or_default();
@@ -223,178 +222,174 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         }
         output::print_cancel_hint();
     } else {
-        output::print_bound(endpoint.local_addr()?);
+        output::print_bound(listener.local_addr()?);
     }
 
-    let mut spinner = if args.no_progress {
+    let no_progress = args.no_progress || policy::get().no_progress();
+    let auto_accept = args.auto_accept;
+    let output_dir = args.output.clone();
+
+    let waiting: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(if no_progress {
         None
     } else {
         Some(output::spinner("Waiting", "for incoming connection…"))
-    };
+    }));
 
     loop {
         if cancelled.load(Ordering::SeqCst) {
             break;
         }
 
-        // Wait with a 500 ms timeout so the cancelled flag is polled.
-        let incoming =
-            match compio::time::timeout(Duration::from_millis(500), endpoint.wait_incoming()).await
-            {
-                Ok(Some(i)) => {
-                    if let Some(s) = &spinner {
-                        s.finish_and_clear();
+        let progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+        let progress_s = Arc::clone(&progress);
+        let waiting_s = Arc::clone(&waiting);
+        let transfer_start = Arc::new(Mutex::new(None));
+        let prompt_error: Arc<Mutex<Option<anyhow::Error>>> = Arc::new(Mutex::new(None));
+        let transfer_start_stage = Arc::clone(&transfer_start);
+
+        let result = listener
+            .try_accept_one(
+                Duration::from_millis(500),
+                &output_dir,
+                {
+                    let cancelled = Arc::clone(&cancelled);
+                    move |stage| {
+                        if cancelled.load(Ordering::SeqCst) {
+                            return Err(EngineError::Cancelled(
+                                "transfer cancelled by user".into(),
+                            ));
+                        }
+                        match stage {
+                            TransferStage::WaitingForPeer => {},
+                            TransferStage::Connected { peer } => {
+                                clear_spinner(&waiting_s);
+                                output::ok(&format!("Connection from {peer}"));
+                            },
+                            TransferStage::Handshaking => {
+                                output::stage("handshake", "negotiating cipher…");
+                            },
+                            TransferStage::Offer { meta, cipher_id, peer } => {
+                                let kind = if meta.transfer_type == TransferKind::Directory {
+                                    "directory"
+                                } else {
+                                    "file"
+                                };
+                                output::print_transfer_offer(
+                                    &meta.filename,
+                                    meta.total_size,
+                                    kind,
+                                    peer,
+                                    output::cipher_name(cipher_id),
+                                    &meta.hash_algo,
+                                );
+                            },
+                            TransferStage::Transferring { filename, total_size } => {
+                                *transfer_start_stage.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    Some(Instant::now());
+                                output::stage("receive", &filename);
+                                if !no_progress && total_size > 0 {
+                                    *progress_s.lock().unwrap() =
+                                        Some(output::transfer_progress_bar("receive", total_size));
+                                }
+                            },
+                            TransferStage::Finishing
+                            | TransferStage::Connecting { .. }
+                            | TransferStage::Pairing { .. }
+                            | TransferStage::Discovering { .. }
+                            | TransferStage::Ready { .. } => {},
+                            _ => {},
+                        }
+                        Ok(())
                     }
-                    i
+                },
+                {
+                    let output_dir = output_dir.clone();
+                    let prompt_error = Arc::clone(&prompt_error);
+                    move |meta, peer| {
+                        if auto_accept {
+                            return Some(resolve_output(&output_dir, meta));
+                        }
+                        match output::suspend_for_prompt(|| prompt_accept(meta, peer, &output_dir))
+                        {
+                            Ok(path) => path,
+                            Err(e) => {
+                                *prompt_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(e);
+                                None
+                            },
+                        }
+                    }
+                },
+                {
+                    let cancelled = Arc::clone(&cancelled);
+                    let progress = Arc::clone(&progress);
+                    move |bytes| {
+                        if cancelled.load(Ordering::SeqCst) {
+                            return Err(EngineError::Cancelled(
+                                "transfer cancelled by user".into(),
+                            ));
+                        }
+                        if let Some(pb) = progress.lock().unwrap().as_ref() {
+                            output::set_transfer_position(pb, bytes);
+                        }
+                        Ok(())
+                    }
+                },
+            )
+            .await;
+
+        match result {
+            Ok(None) => continue,
+            Ok(Some(outcome)) => {
+                if let Some(pb) = progress.lock().unwrap().take() {
+                    output::finish_transfer_progress(&pb, outcome.meta.total_size);
                 }
-                Ok(None) => break,
-                Err(_timeout) => continue,
-            };
-        let conn = match incoming.await {
-            Ok(c) => c,
-            Err(e) => {
-                if !is_peer_close(&e) {
-                    output::err(&format!("Connection failed: {e}"));
-                }
-                respawn_spinner(args.no_progress, &mut spinner);
-                continue;
-            }
-        };
-        let peer = conn.remote_address();
-        output::ok(&format!("Connection from {peer}"));
-
-        let (mut send_stream, mut recv_stream) = match conn.accept_bi().await {
-            Ok(streams) => streams,
-            Err(e) => {
-                if !is_peer_close(&e) {
-                    output::err(&format!("Failed to accept streams: {e}"));
-                }
-                respawn_spinner(args.no_progress, &mut spinner);
-                continue;
-            }
-        };
-
-        output::stage("handshake", "negotiating cipher…");
-        let ((key, cipher_id), meta) = match transfer::handshake_receiver_split(
-            &mut send_stream,
-            &mut recv_stream,
-            None,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                output::err(&format!("Handshake failed: {e}"));
-                respawn_spinner(args.no_progress, &mut spinner);
-                continue;
-            }
-        };
-
-        // ── Transfer offer card ──────────────────────────────────────
-        let kind = if meta.transfer_type == TransferKind::Directory {
-            "directory"
-        } else {
-            "file"
-        };
-        output::print_transfer_offer(
-            &meta.filename,
-            meta.total_size,
-            kind,
-            peer,
-            output::cipher_name(cipher_id),
-            &meta.hash_algo,
-        );
-
-        let dest = if args.auto_accept {
-            Some(resolve_output(&args.output, &meta))
-        } else {
-            let result = output::suspend_for_prompt(|| prompt_accept(&meta, peer, &args.output));
-            result?
-        };
-
-        let accept = dest.is_some();
-        if cancelled.load(Ordering::SeqCst) {
-            break;
-        }
-        if let Err(e) = transfer::send_consent_write(&mut send_stream, accept).await {
-            output::err(&format!("Failed to send transfer consent: {e}"));
-            respawn_spinner(args.no_progress, &mut spinner);
-            continue;
-        }
-        if !accept {
-            output::warn("Transfer rejected.");
-            conn.close(0u32.into(), b"rejected");
-            respawn_spinner(args.no_progress, &mut spinner);
-            continue;
-        }
-        let dest = dest.unwrap();
-
-        output::stage("receive", &meta.filename);
-        output::key_value("output", dest.display());
-        let start = Instant::now();
-
-        let pb = if args.no_progress || meta.total_size == 0 || policy::get().no_progress() {
-            None
-        } else {
-            let pb = output::transfer_progress_bar("receive", meta.total_size);
-            Some(pb)
-        };
-
-        let pb_clone = pb.clone();
-        let cancelled_clone = Arc::clone(&cancelled);
-        let receive_result = transfer::receive_payload_split(
-            &key,
-            cipher_id,
-            &mut recv_stream,
-            &dest,
-            meta.transfer_type,
-            meta.total_size,
-            &meta.hash_algo,
-            move |bytes| {
-                if cancelled_clone.load(Ordering::SeqCst) {
-                    return Err(EngineError::Cancelled("transfer cancelled by user".into()));
-                }
-                if let Some(pb) = &pb_clone {
-                    output::set_transfer_position(pb, bytes);
-                }
-                Ok(())
-            },
-        )
-        .await;
-
-        if let Some(pb) = &pb {
-            output::finish_transfer_progress(pb, meta.total_size);
-        }
-
-        let checksum = match receive_result {
-            Ok(checksum) => checksum,
-            Err(EngineError::Cancelled(_)) => {
-                output::err("Transfer cancelled");
+                output::key_value("output", outcome.path.display());
+                let elapsed = transfer_start
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .map_or(0.0, |start| start.elapsed().as_secs_f64());
+                output::print_transfer_summary(
+                    &outcome.meta.filename,
+                    outcome.meta.total_size,
+                    elapsed,
+                    &outcome.checksum,
+                    false,
+                    output::cipher_name(outcome.cipher_id),
+                );
                 break;
-            }
-            Err(e) => {
-                output::err(&format!("Transfer failed: {e}"));
-                conn.close(1u32.into(), b"failed");
-                respawn_spinner(args.no_progress, &mut spinner);
+            },
+            Err(EngineError::TransferRejected) => {
+                clear_progress(&progress);
+                if let Some(error) = prompt_error.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    return Err(error).context("receive prompt failed");
+                }
+                output::warn("Transfer rejected.");
+                respawn_waiting(no_progress, &waiting);
                 continue;
-            }
-        };
-
-        let elapsed = start.elapsed().as_secs_f64();
-        output::print_transfer_summary(
-            &meta.filename,
-            meta.total_size,
-            elapsed,
-            &checksum,
-            false,
-            output::cipher_name(cipher_id),
-        );
-
-        // Finish our send stream to signal the sender, then close.
-        let _ = send_stream.finish();
-        compio::time::sleep(std::time::Duration::from_millis(200)).await;
-        conn.close(0u32.into(), b"complete");
-        break;
+            },
+            Err(EngineError::Cancelled(_)) => {
+                clear_progress(&progress);
+                output::err("Transfer cancelled");
+                bail!("cancelled");
+            },
+            Err(EngineError::Handshake(message)) if message == "Endpoint closed" => {
+                clear_spinner(&waiting);
+                break;
+            },
+            Err(e) if is_benign_peer_close(&e) => {
+                respawn_waiting(no_progress, &waiting);
+                continue;
+            },
+            Err(e) => {
+                clear_progress(&progress);
+                if let Some(error) = prompt_error.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    return Err(error).context("receive prompt failed");
+                }
+                output::err(&format!("{e}"));
+                respawn_waiting(no_progress, &waiting);
+                continue;
+            },
+        }
     }
 
     Ok(())
@@ -404,28 +399,24 @@ pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Returns true if the error is a peer-initiated connection close (e.g. a
-/// discover probe or remote shutdown). These are benign and should be
-/// silently ignored so the listener keeps waiting.
-fn is_peer_close(e: &QuicConnectionError) -> bool {
-    matches!(
-        e,
-        QuicConnectionError::ApplicationClosed(_) | QuicConnectionError::ConnectionClosed(_)
-    )
+fn clear_spinner(spinner: &Arc<Mutex<Option<ProgressBar>>>) {
+    if let Some(s) = spinner.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        s.finish_and_clear();
+    }
+}
+
+fn clear_progress(progress: &Arc<Mutex<Option<ProgressBar>>>) {
+    if let Some(pb) = progress.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        pb.finish_and_clear();
+    }
 }
 
 /// Re-creates a "Waiting" spinner after handling a failed connection.
-/// Any previous spinner is finished and cleared first so only one live
-/// spinner appears at a time.
-fn respawn_spinner(no_progress: bool, current: &mut Option<indicatif::ProgressBar>) {
-    if let Some(pb) = current.take() {
-        pb.finish_and_clear();
-    }
+fn respawn_waiting(no_progress: bool, waiting: &Arc<Mutex<Option<ProgressBar>>>) {
+    clear_spinner(waiting);
     if !no_progress {
-        *current = Some(crate::output::spinner(
-            "Waiting",
-            "for incoming connection…",
-        ));
+        *waiting.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(crate::output::spinner("Waiting", "for incoming connection…"));
     }
 }
 
@@ -444,11 +435,8 @@ impl inquire::Autocomplete for DirCompleter {
             )
         };
 
-        let dir_to_read = if dir_path.as_os_str().is_empty() {
-            std::path::Path::new(".")
-        } else {
-            dir_path
-        };
+        let dir_to_read =
+            if dir_path.as_os_str().is_empty() { std::path::Path::new(".") } else { dir_path };
 
         let mut suggestions = Vec::new();
         if let Ok(entries) = std::fs::read_dir(dir_to_read) {
@@ -493,11 +481,7 @@ fn prompt_accept(
     peer: SocketAddr,
     default_dir: &std::path::Path,
 ) -> Result<Option<PathBuf>> {
-    let kind = if meta.transfer_type == TransferKind::Directory {
-        "directory"
-    } else {
-        "file"
-    };
+    let kind = if meta.transfer_type == TransferKind::Directory { "directory" } else { "file" };
 
     let prompt = format!(
         "   Accept {kind} \"{}\" ({}) from {peer}?",
@@ -509,7 +493,7 @@ fn prompt_accept(
         Ok(val) => val,
         Err(inquire::InquireError::OperationInterrupted) => {
             return Ok(None);
-        }
+        },
         Err(e) => return Err(anyhow::anyhow!(e)),
     };
 
@@ -522,7 +506,7 @@ fn prompt_accept(
             Ok(val) => val,
             Err(inquire::InquireError::OperationInterrupted) => {
                 return Ok(None);
-            }
+            },
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
 
@@ -556,10 +540,8 @@ fn spawn_esc_listener(cancelled: Arc<AtomicBool>) {
                 if poll(std::time::Duration::from_millis(0)).is_ok_and(|b| b)
                     && let Ok(Event::Key(k)) = read()
                 {
-                    let exit = matches!(
-                        k.code,
-                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
-                    );
+                    let exit =
+                        matches!(k.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q'));
                     if exit && !k.modifiers.contains(KeyModifiers::CONTROL) {
                         cancelled.store(true, Ordering::SeqCst);
                     }

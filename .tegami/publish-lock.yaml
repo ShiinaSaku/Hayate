@@ -1,0 +1,13 @@
+core:changelogs:
+  - content: "---\npackages:\n  hayate:\n    type: major\n---\n\n### Staged transfer API and library polish\n\n- Add staged hooks on `HayateSender` / `HayateReceiver` (`send_with`, `receive_with`, `ListeningReceiver`) so callers can observe connect, handshake, progress, and completion without owning the engine.\n- Harden transfer, crypto, discovery, and protocol paths used by the public API.\n- Author and project identity: Saku Shiina `<saku@shiina.xyz>`, site `https://hayate.shiina.xyz`.\n\n### CLI: docs, exit codes, and install surface\n\n- Replace man-page generation with `hayate docs` (terminal handbook + web docs pointer).\n- Map `EngineError` to stable CLI exit codes for scripting.\n- Ship shell completions install helpers; publish the binary crate to crates.io as `hayate-cli`.\n\n### Release tooling\n\n- Shared release target matrix for native binaries and npm platform packages.\n- Tegami-driven versioning for both workspace crates; local npm publish without GitHub.\n"
+    filename: 2026-07-11-44fd0d.md
+    v: 0.0.0
+core:packages:
+  - changelogIds:
+      - 2026-07-11-44fd0d.md
+    id: cargo:hayate
+    updated: true
+  - changelogIds:
+      - 2026-07-11-44fd0d.md
+    id: cargo:hayate-cli
+    updated: true

@@ -1,19 +1,17 @@
 //! `hayate send` subcommand.
 
-use std::{
-    net::ToSocketAddrs,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Instant,
-};
+use std::net::ToSocketAddrs;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use compio::io::AsyncRead;
-use hayate::{EngineError, HayateSender, network, protocol::TransferKind, transfer};
+use hayate::protocol::TransferKind;
+use hayate::{EngineError, HayateSender, TransferStage};
+use indicatif::ProgressBar;
 
-use crate::{cli::SendArgs, output, policy};
+use crate::cli::SendArgs;
+use crate::{output, policy};
 
 pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     if cancelled.load(Ordering::SeqCst) {
@@ -24,226 +22,176 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         bail!("Path does not exist: {}", path.display());
     }
 
-    let target = args.target.as_ref();
+    let compress = args.compress && !args.no_compress;
+    let hash_algo = args.hash.as_str().to_owned();
 
+    let mut builder = HayateSender::new().compress(compress).hash_algo(hash_algo.clone());
+
+    // Pairing code: explicit `--code`, or auto-generated when no target is given.
     let (phrase, print_instruction) = if let Some(code) = &args.code {
-        (code.clone(), false)
-    } else if target.is_none() {
+        (Some(code.clone()), false)
+    } else if args.target.is_none() {
         let p = crate::words::generate_phrase();
-        (p, policy::get().normal())
+        (Some(p), policy::get().normal())
     } else {
-        (String::new(), false)
+        (None, false)
     };
 
-    // ── Stage 1: Connect ─────────────────────────────────────────────
-    let (conn, passphrase) = if let Some(target_str) = target {
+    if let Some(target_str) = &args.target {
         let target_addr = target_str
             .to_socket_addrs()
             .context("invalid target address")?
             .next()
             .context("could not resolve target")?;
-
-        output::stage("connect", format!("dialing {target_addr}"));
-
-        let endpoint = network::bind_client()
-            .await
-            .context("Failed to bind UDP socket for client")?;
-        let client_config =
-            network::client_config().context("Failed to build client configuration")?;
-        let spinner = if args.no_progress {
-            None
-        } else {
-            Some(output::spinner("Connecting", &target_addr.to_string()))
-        };
-        let conn_result: Result<_> =
-            match endpoint.connect(target_addr, "hayate.local", Some(client_config)) {
-                Ok(connecting) => connecting
-                    .await
-                    .context("Failed to establish connection to receiver"),
-                Err(e) => Err(e.into()),
-            };
-        if let Some(spinner) = &spinner {
-            spinner.finish_and_clear();
+        builder = builder.target(target_addr);
+        // Optional out-of-band secret on a direct transfer.
+        if let Some(code) = phrase {
+            builder = builder.passphrase(code);
         }
-        let conn = conn_result?;
-        (conn, args.code.clone())
     } else {
+        let phrase = phrase.expect("pairing mode always has a phrase");
         if print_instruction {
             output::pairing_code(&phrase, &format!("hayate receive --code \"{phrase}\""));
-        } else {
-            output::stage("pairing", format!("waiting with code \"{phrase}\""));
         }
-
-        let bind_addr =
-            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0);
-        let endpoint = network::bind_server(bind_addr)
-            .await
-            .context("Failed to bind server socket")?;
-        let local_port = endpoint.local_addr()?.port();
-
-        let os_name = std::env::consts::OS.to_owned();
-        let channel_id = hayate::discovery::derive_channel_id(&phrase);
-        let _broadcaster_guard =
-            hayate::discovery::start_broadcaster_hybrid(&channel_id, local_port, &os_name)
-                .context("Failed to start hybrid broadcaster")?;
-
-        let spinner = if args.no_progress {
-            None
-        } else {
-            Some(output::spinner("Pairing", "waiting for receiver…"))
-        };
-        let incoming = endpoint
-            .wait_incoming()
-            .await
-            .context("endpoint closed while waiting for pairing");
-        let incoming = match incoming {
-            Ok(incoming) => incoming,
-            Err(e) => {
-                if let Some(spinner) = &spinner {
-                    spinner.finish_and_clear();
-                }
-                return Err(e);
-            }
-        };
-        if let Some(spinner) = &spinner {
-            output::spinner_update(spinner, "Pairing", "receiver connected");
-        }
-        let conn_result = incoming
-            .await
-            .context("Connection handshake failed with receiver");
-        if let Some(spinner) = &spinner {
-            spinner.finish_and_clear();
-        }
-        let conn = conn_result?;
-        (conn, Some(phrase))
-    };
-
-    output::ok(&format!("Connected to {}", conn.remote_address()));
-
-    let (mut send_stream, mut recv_stream) = conn
-        .open_bi()
-        .context("Failed to open streams for handshake")?;
-
-    // ── Stage 2: Prepare ─────────────────────────────────────────────
-    let sender = HayateSender::new()
-        .compress(args.compress)
-        .hash_algo(args.hash.clone());
-    let (meta, total_size) = sender.build_metadata(path)?;
-
-    // ── Stage 3: Handshake ───────────────────────────────────────────
-    output::stage("handshake", "negotiating cipher…");
-    let (key, cipher_id) = transfer::handshake_sender_split(
-        &mut send_stream,
-        &mut recv_stream,
-        &meta,
-        passphrase.as_deref(),
-    )
-    .await
-    .context("Handshake cipher negotiation failed")?;
-
-    // ── Show transfer info card ──────────────────────────────────────
-    let kind = if meta.transfer_type == TransferKind::Directory {
-        "directory"
-    } else {
-        "file"
-    };
-    output::print_info_card(
-        "Sending",
-        &[
-            ("file", meta.filename.clone()),
-            ("type", kind.to_owned()),
-            ("size", output::format_bytes(total_size)),
-            (
-                "compress",
-                if args.compress {
-                    "zstd level 1".to_owned()
-                } else {
-                    "off".to_owned()
-                },
-            ),
-            ("hash", args.hash.clone()),
-            ("cipher", output::cipher_name(cipher_id).to_owned()),
-            ("peer", conn.remote_address().to_string()),
-        ],
-    );
-
-    // ── Stage 4: Transfer ────────────────────────────────────────────
-    let pb = if args.no_progress || total_size == 0 || policy::get().no_progress() {
-        None
-    } else {
-        let pb = output::transfer_progress_bar("send", total_size);
-        Some(pb)
-    };
-
-    let start = Instant::now();
-    let cancelled_transfer = Arc::clone(&cancelled);
-    let pb_clone = pb.clone();
-
-    let checksum = if path.is_dir() {
-        sender
-            .send_directory(path, &key, cipher_id, &args.hash, &mut send_stream, {
-                let pb = pb_clone.clone();
-                move |b| {
-                    if cancelled_transfer.load(Ordering::SeqCst) {
-                        return Err(EngineError::Cancelled("transfer cancelled by user".into()));
-                    }
-                    if let Some(pb) = &pb {
-                        output::set_transfer_position(pb, b);
-                    }
-                    Ok(())
-                }
-            })
-            .await
-            .context("Failed to send directory contents")?
-    } else {
-        sender
-            .send_file(path, &key, cipher_id, &args.hash, &mut send_stream, {
-                let pb = pb_clone;
-                move |b| {
-                    if cancelled_transfer.load(Ordering::SeqCst) {
-                        return Err(EngineError::Cancelled("transfer cancelled by user".into()));
-                    }
-                    if let Some(pb) = &pb {
-                        output::set_transfer_position(pb, b);
-                    }
-                    Ok(())
-                }
-            })
-            .await
-            .context("Failed to send file contents")?
-    };
-
-    // Finish the send stream and notify receiver we're done sending.
-    send_stream
-        .finish()
-        .context("Failed to finalize send stream")?;
-
-    // Wait for the receiver to acknowledge completion with a time-bounded read.
-    // If the receiver has closed the connection, reading will either return
-    // EOF (Ok(0)) or an error. We use a timeout to avoid hanging if the
-    // receiver disappears.
-    let drain_buf = vec![0u8; 1];
-    let _ = compio::time::timeout(
-        std::time::Duration::from_secs(10),
-        recv_stream.read(drain_buf),
-    )
-    .await;
-
-    if let Some(pb) = &pb {
-        output::finish_transfer_progress(pb, total_size);
+        builder = builder.code(phrase);
     }
 
-    // ── Stage 5: Summary ─────────────────────────────────────────────
-    let elapsed = start.elapsed().as_secs_f64();
+    let spinner: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+    let progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
+    let no_progress = args.no_progress || policy::get().no_progress();
+    let transfer_start = Arc::new(Mutex::new(None));
+
+    let spinner_for_stages = Arc::clone(&spinner);
+    let progress_for_stages = Arc::clone(&progress);
+    let cancelled_transfer = Arc::clone(&cancelled);
+    let transfer_start_stage = Arc::clone(&transfer_start);
+
+    let result = builder
+        .send_with(
+            path,
+            move |stage| {
+                if cancelled_transfer.load(Ordering::SeqCst) {
+                    return Err(EngineError::Cancelled("transfer cancelled by user".into()));
+                }
+                match stage {
+                    TransferStage::Connecting { peer } => {
+                        output::stage("connect", format!("dialing {peer}"));
+                        if !no_progress {
+                            *spinner_for_stages.lock().unwrap() =
+                                Some(output::spinner("Connecting", &peer.to_string()));
+                        }
+                    },
+                    TransferStage::Pairing { code } => {
+                        if !print_instruction {
+                            output::stage("pairing", format!("waiting with code \"{code}\""));
+                        }
+                        if !no_progress {
+                            *spinner_for_stages.lock().unwrap() =
+                                Some(output::spinner("Pairing", "waiting for receiver…"));
+                        }
+                    },
+                    TransferStage::Connected { peer } => {
+                        clear_spinner(&spinner_for_stages);
+                        output::ok(&format!("Connected to {peer}"));
+                    },
+                    TransferStage::Handshaking => {
+                        output::stage("handshake", "negotiating cipher…");
+                    },
+                    TransferStage::Ready { meta, cipher_id, peer, total_size } => {
+                        let kind = if meta.transfer_type == TransferKind::Directory {
+                            "directory"
+                        } else {
+                            "file"
+                        };
+                        output::print_info_card(
+                            "Sending",
+                            &[
+                                ("file", meta.filename.clone()),
+                                ("type", kind.to_owned()),
+                                ("size", output::format_bytes(total_size)),
+                                (
+                                    "compress",
+                                    if compress {
+                                        "zstd level 1".to_owned()
+                                    } else {
+                                        "off".to_owned()
+                                    },
+                                ),
+                                ("hash", hash_algo.clone()),
+                                ("cipher", output::cipher_name(cipher_id).to_owned()),
+                                ("peer", peer.to_string()),
+                            ],
+                        );
+                        if !no_progress && total_size > 0 {
+                            *progress_for_stages.lock().unwrap() =
+                                Some(output::transfer_progress_bar("send", total_size));
+                        }
+                    },
+                    TransferStage::Transferring { .. } => {
+                        *transfer_start_stage.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(Instant::now());
+                    },
+                    TransferStage::Finishing
+                    | TransferStage::WaitingForPeer
+                    | TransferStage::Discovering { .. }
+                    | TransferStage::Offer { .. } => {},
+                    // `TransferStage` is non_exhaustive for future engine stages.
+                    _ => {},
+                }
+                Ok(())
+            },
+            {
+                let cancelled = Arc::clone(&cancelled);
+                let progress = Arc::clone(&progress);
+                move |bytes| {
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Err(EngineError::Cancelled("transfer cancelled by user".into()));
+                    }
+                    if let Some(pb) = progress.lock().unwrap().as_ref() {
+                        output::set_transfer_position(pb, bytes);
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await;
+
+    clear_spinner(&spinner);
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            clear_progress(&progress);
+            return Err(error).context("send failed");
+        },
+    };
+    if let Some(pb) = progress.lock().unwrap().take() {
+        output::finish_transfer_progress(&pb, outcome.total_size);
+    }
+
+    let elapsed = transfer_start
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .map_or(0.0, |start| start.elapsed().as_secs_f64());
     output::print_transfer_summary(
-        &meta.filename,
-        total_size,
+        &outcome.meta.filename,
+        outcome.total_size,
         elapsed,
-        &checksum,
-        args.compress,
-        output::cipher_name(cipher_id),
+        &outcome.checksum,
+        compress,
+        output::cipher_name(outcome.cipher_id),
     );
 
-    conn.close(0u32.into(), b"complete");
     Ok(())
+}
+
+fn clear_spinner(spinner: &Arc<Mutex<Option<ProgressBar>>>) {
+    if let Some(s) = spinner.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        s.finish_and_clear();
+    }
+}
+
+fn clear_progress(progress: &Arc<Mutex<Option<ProgressBar>>>) {
+    if let Some(pb) = progress.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        pb.finish_and_clear();
+    }
 }

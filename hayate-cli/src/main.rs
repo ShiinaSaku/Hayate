@@ -26,11 +26,9 @@ use compio::runtime::spawn;
 /// where the user wants to override that detection.
 fn apply_color_override(args: &[String]) {
     let value = args.iter().enumerate().find_map(|(i, arg)| {
-        arg.strip_prefix("--color=").map(str::to_owned).or_else(|| {
-            (arg == "--color")
-                .then(|| args.get(i + 1).cloned())
-                .flatten()
-        })
+        arg.strip_prefix("--color=")
+            .map(str::to_owned)
+            .or_else(|| (arg == "--color").then(|| args.get(i + 1).cloned()).flatten())
     });
     match value.as_deref() {
         Some("always") => {
@@ -38,14 +36,15 @@ fn apply_color_override(args: &[String]) {
             console::set_colors_enabled_stderr(true);
             console::set_true_colors_enabled(true);
             console::set_true_colors_enabled_stderr(true);
-        }
+        },
         Some("never") => {
             console::set_colors_enabled(false);
             console::set_colors_enabled_stderr(false);
-        }
+        },
         _ => {
-            // "auto", unrecognized, or unset: leave console's own detection alone.
-        }
+            // "auto", unrecognized, or unset: leave console's own detection
+            // alone.
+        },
     }
 }
 
@@ -54,8 +53,8 @@ fn main() -> impl Termination {
         Ok(exit_code) => exit_code,
         Err(err) => {
             output::print_error(&err);
-            ExitCode::from(exit_code::CliExitCode::GeneralError)
-        }
+            ExitCode::from(exit_code::CliExitCode::from_anyhow(&err))
+        },
     }
 }
 
@@ -68,11 +67,7 @@ fn run() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if args.iter().any(|arg| arg == "--version") {
-        println!(
-            "v{} (commit: {})",
-            env!("CARGO_PKG_VERSION"),
-            env!("GIT_COMMIT_HASH")
-        );
+        println!("v{} (commit: {})", env!("CARGO_PKG_VERSION"), env!("GIT_COMMIT_HASH"));
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -87,7 +82,7 @@ fn run() -> Result<ExitCode> {
                 output::print_banner();
             }
             err.exit();
-        }
+        },
     };
 
     policy::init(&cli);
@@ -121,7 +116,7 @@ fn run() -> Result<ExitCode> {
         let res = subcmd::dispatch(cli, cancelled).await;
         if let Err(err) = res {
             output::print_error(&err);
-            return Ok(ExitCode::from(exit_code::CliExitCode::GeneralError));
+            return Ok(ExitCode::from(exit_code::CliExitCode::from_anyhow(&err)));
         }
         Ok(ExitCode::SUCCESS)
     })

@@ -66,12 +66,7 @@ fn encode_directory_metadata(bencher: Bencher) {
 
 #[divan::bench]
 fn decode_large_payload(bencher: Bencher) {
-    let meta = Metadata::new(
-        "x".repeat(200),
-        1 << 40,
-        TransferKind::File,
-        "blake3".to_owned(),
-    );
+    let meta = Metadata::new("x".repeat(200), 1 << 40, TransferKind::File, "blake3".to_owned());
     let encoded = meta.encode();
     bencher.bench(|| divan::black_box(Metadata::decode(divan::black_box(&encoded)).unwrap()));
 }

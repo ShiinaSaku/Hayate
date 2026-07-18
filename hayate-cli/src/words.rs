@@ -70,11 +70,7 @@ pub fn generate_phrase() -> String {
             indices.push(idx);
         }
     }
-    indices
-        .into_iter()
-        .map(|i| WORDS[i])
-        .collect::<Vec<_>>()
-        .join("-")
+    indices.into_iter().map(|i| WORDS[i]).collect::<Vec<_>>().join("-")
 }
 
 #[cfg(test)]
@@ -92,11 +88,7 @@ mod tests {
         let phrase = generate_phrase();
         let parts: Vec<_> = phrase.split('-').collect();
         let unique: std::collections::HashSet<_> = parts.iter().copied().collect();
-        assert_eq!(
-            unique.len(),
-            parts.len(),
-            "phrase words must be selected without replacement"
-        );
+        assert_eq!(unique.len(), parts.len(), "phrase words must be selected without replacement");
     }
 
     #[test]
@@ -104,10 +96,7 @@ mod tests {
         let phrase = generate_phrase();
         let list: std::collections::HashSet<_> = WORDS.iter().copied().collect();
         for word in phrase.split('-') {
-            assert!(
-                list.contains(word),
-                "generated word {word} must be in the approved word list"
-            );
+            assert!(list.contains(word), "generated word {word} must be in the approved word list");
         }
     }
 

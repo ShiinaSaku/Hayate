@@ -1,12 +1,14 @@
-//! Standalone example demonstrating how to send files programmatically using `HayateSender`.
+//! Standalone example demonstrating how to send files programmatically using
+//! `HayateSender`.
 //!
 //! Run this example with:
 //! ```bash
 //! cargo run --example send <file_or_directory_path> <receiver_ip:port>
 //! ```
 
-use hayate::runner::HayateSender;
 use std::net::SocketAddr;
+
+use hayate::runner::HayateSender;
 
 #[compio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
