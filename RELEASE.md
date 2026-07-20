@@ -1,6 +1,28 @@
 # How to Release
 
-Hayate releases are driven by [Tegami](https://tegami.fuma-nama.dev). Merging a Tegami version PR bumps the workspace version, publishes the `hayate` library to crates.io, creates a GitHub release, and triggers a matrix workflow that builds and attaches binaries for Linux, macOS, Windows, and Android (Termux).
+Hayate releases are driven by [Tegami](https://tegami.fuma-nama.dev). Merging a Tegami version PR bumps the workspace version, publishes the `hayate` library to crates.io, creates a GitHub release (e.g. **Hayate v6.0.0 — Shinka (進化)** — codenames live in `scripts/tegami.mts`), and triggers a matrix workflow that builds and attaches binaries for Linux, macOS, Windows, and Android (Termux).
+
+Both crates share one version and bump in lockstep: `scripts/tegami.mts` declares a `hayate` group with `syncBump` + `syncGitTag`, so one git tag (`hayate@<version>`) and one GitHub release cover the whole workspace.
+
+---
+
+## One-time setup: trusted publishing
+
+Publishing is tokenless — no `CARGO_REGISTRY_TOKEN` or `NPM_TOKEN` secrets. Both registries authenticate via GitHub OIDC; configure this once:
+
+### crates.io
+
+1. Open the `hayate` crate on crates.io → **Settings → Trusted Publishing**.
+2. Add a GitHub Actions publisher: owner `ShiinaSaku`, repo `Hayate`, workflow filename `publish.yml`, no environment.
+3. The `Publish` workflow exchanges OIDC for a short-lived token via `rust-lang/crates-io-auth-action` — nothing else to do.
+
+### npm
+
+1. For **each** of the 9 packages (`@shiinasaku/hayate` plus the 8 platform packages), open npmjs.com → package **Settings → Publishing access → Trusted Publisher**.
+2. Add GitHub Actions: org/user `ShiinaSaku`, repository `Hayate`, workflow filename `release-binaries.yml`, no environment.
+3. The `npm` job installs Node 24 (which ships npm 11) and `npm publish --provenance` picks up OIDC automatically.
+
+If a trusted-publisher exchange fails, the error message names the package and the missing config — fix the dashboard entry and re-run the workflow.
 
 ---
 
@@ -31,8 +53,8 @@ Tegami computes the new version from the changelogs and opens a PR. Review it, t
 
 Merging the version PR triggers the `Publish` workflow (`.github/workflows/publish.yml`). It:
 
-- Publishes the `hayate` crate to crates.io.
-- Creates a GitHub release for `hayate@<version>`.
+- Publishes the `hayate` crate to crates.io via trusted publishing (OIDC, no stored token).
+- Creates the GitHub release for `hayate@<version>` with the codename title from `scripts/tegami.mts`.
 
 ### 4. Binary release
 
@@ -53,7 +75,7 @@ A final job aggregates all uploaded artifacts into `SHA256SUMS.txt` and re-uploa
 
 ### 5. npm distribution
 
-The `npm` job in the same workflow downloads the release archives, repackages the native binary for each platform into a scoped npm package, and publishes:
+The `npm` job in the same workflow bundles the TypeScript wrapper with tsdown (Node 24 in CI; tsdown needs ≥ 22.18, output still targets Node 18), downloads the release archives plus `SHA256SUMS.txt`, verifies every archive's SHA-256, rejects unsafe archive paths, repackages the native binary for each platform into a scoped npm package, and publishes with `--provenance` attestation via trusted publishing (OIDC, no stored token):
 
 - `@shiinasaku/hayate` — the main CLI wrapper that installs the correct native binary as an optional dependency.
 - `@shiinasaku/hayate-darwin-x64` / `...arm64`
@@ -94,6 +116,7 @@ Type-check the release scripts with `bun run typecheck`.
 | Publish `hayate-cli`           | It's `publish = false` on purpose; only the library ships.  |
 | Hand-edit `Cargo.lock` version | Run `cargo update -p hayate -p hayate-cli` after bumping.    |
 | Edit `.tegami/publish-lock.yaml` or package changelogs | Tegami owns these files.                                    |
+| Re-add registry token secrets  | Publishing is OIDC trusted publishing on both registries.    |
 
 ---
 

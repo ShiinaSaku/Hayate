@@ -101,8 +101,10 @@ Tegami drives versioning and publishing. Binary releases are built and uploaded 
 
 - Write a pending changelog under `.tegami/` (see the Release workflow section below).
 - Merge the Tegami version PR to bump versions and publish the `hayate` crate to crates.io.
-- The `publish` workflow creates a GitHub release; the `release-binaries` workflow then builds archives (and `.deb` packages) for Linux, macOS, Windows, and Android, and uploads them to the release.
+- The `publish` workflow creates a GitHub release (titled `Hayate vX.Y.Z — <codename>`; codenames per major version live in `scripts/tegami.mts`); the `release-binaries` workflow then builds archives (and `.deb` packages) for Linux, macOS, Windows, and Android, and uploads them to the release.
 - `hayate-cli` stays `publish = false`; only the library is published to crates.io.
+- Both crates bump in lockstep: `scripts/tegami.mts` groups them with `syncBump` + `syncGitTag` (one version, one tag, one release). `patches/tegami@*.patch` (bun `patchedDependencies`) fixes tegami's cargo plugin double-bumping the shared `[workspace.package]` version — do not delete it, and re-apply when bumping tegami until fixed upstream.
+- Publishing is **tokenless** on both registries (OIDC trusted publishing): crates.io via `rust-lang/crates-io-auth-action` in `publish.yml`, npm via `--provenance` + `id-token: write` in `release-binaries.yml`. No `CARGO_REGISTRY_TOKEN` / `NPM_TOKEN` secrets — the one-time dashboard config per registry is documented in `RELEASE.md`.
 - Never force-push or recreate a tag.
 
 ## Binary builds
@@ -133,15 +135,21 @@ Platform packages:
 - `@shiinasaku/hayate-win32-x64` / `@shiinasaku/hayate-win32-arm64`
 - `@shiinasaku/hayate-android-x64` / `@shiinasaku/hayate-android-arm64`
 
-The npm release script is `bun run npm:release`. It downloads the GitHub release archives plus
+The npm release script is `bun run npm:release`. The wrapper (`npm/hayate/`) is TypeScript
+under `src/`, bundled with **tsdown** (`bun run npm:build`; requires Node ≥ 22.18 at build
+time, output targets Node 18) into `dist/` — the published layout stays `index.js` +
+`index.d.ts` + `bin/hayate.js`. The script downloads the GitHub release archives plus
 `SHA256SUMS.txt`, verifies every archive's SHA-256 before repackaging (and rejects absolute /
 `..` paths inside archives), then publishes the scoped packages — with `--provenance`
-attestation when running in GitHub Actions. It requires `NPM_TOKEN` in GitHub secrets and the
-`id-token: write` permission (see the `npm` job in `release-binaries.yml`).
+attestation in GitHub Actions, authenticated via OIDC trusted publishing (no token; the job
+has `id-token: write` and installs Node 24 for tsdown + npm 11 — see the `npm` job in
+`release-binaries.yml`).
 
 ## TypeScript release scripts
 
-`build.ts` and `scripts/tegami.mts` are checked with `bun run typecheck` (which runs `bun tsc --noEmit`). The root `tsconfig.json` only includes those files.
+`build.ts`, `scripts/tegami.mts`, and the npm wrapper sources (`npm/hayate/src/`) are checked
+with `bun run typecheck` (which runs `bun tsc --noEmit`); `npm/hayate/` has its own
+`tsconfig.json` for the tsdown build.
 
 # Release workflow
 
