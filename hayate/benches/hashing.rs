@@ -1,4 +1,4 @@
-//! CodSpeed benchmarks for hash algorithm throughput comparison.
+//! Benchmarks for hash algorithm throughput comparison.
 //!
 //! Hayate uses blake3 and SHA-256 for transfer integrity. This file
 //! benchmarks both at representative payload sizes to track throughput and

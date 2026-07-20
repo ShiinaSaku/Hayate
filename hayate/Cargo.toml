@@ -56,7 +56,7 @@ blake3 = { workspace = true }
 
 [dev-dependencies]
 compio = { workspace = true }
-divan = { version = "5.0.1", package = "codspeed-divan-compat" }
+divan = "0.1.21"
 blake3 = { workspace = true }
 ring = { workspace = true }
 

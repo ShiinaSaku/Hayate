@@ -1,4 +1,4 @@
-//! CodSpeed benchmarks for Hayate's cryptographic hot path.
+//! Benchmarks for Hayate's cryptographic hot path.
 //!
 //! These cover the per-frame AEAD sealing/opening that every transfer worker
 //! runs thousands of times, plus the one-time X25519 + HKDF key agreement that
@@ -19,13 +19,24 @@ const SIZES: &[usize] = &[256, 4 * 1024, 64 * 1024, 1024 * 1024];
 fn derive_key(bencher: Bencher) {
     bencher
         .with_inputs(|| {
-            let (secret, _) = crypto::generate_keypair();
+            let (secret, sender_pub) = crypto::generate_keypair();
             let (_, peer_pub) = crypto::generate_keypair();
-            (secret, peer_pub)
+            let salt = crypto::generate_salt();
+            (secret, sender_pub, peer_pub, salt)
         })
-        .bench_values(|(secret, peer_pub)| {
+        .bench_values(|(secret, sender_pub, peer_pub, salt)| {
             divan::black_box(
-                crypto::derive_key(secret, &peer_pub, Some("apple-bravo-charlie")).unwrap(),
+                crypto::derive_key(crypto::KeyDerivationContext {
+                    secret,
+                    peer_pub: &peer_pub,
+                    salt: &salt,
+                    passphrase: Some("apple-bravo-charlie"),
+                    sender_pub: &sender_pub,
+                    receiver_pub: &peer_pub,
+                    sender_cap: CIPHER_CHACHA20,
+                    selected_cipher: CIPHER_CHACHA20,
+                })
+                .unwrap(),
             )
         });
 }

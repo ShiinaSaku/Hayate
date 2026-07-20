@@ -1,4 +1,4 @@
-//! CodSpeed benchmarks for Hayate's wire protocol metadata codec.
+//! Benchmarks for Hayate's wire protocol metadata codec.
 //!
 //! Metadata is encoded and decoded once per transfer during the encrypted
 //! handshake. The codec is small but on the critical path before any payload
