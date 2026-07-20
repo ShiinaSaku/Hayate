@@ -370,7 +370,18 @@ async function buildPlatformPackage(
   return pkgDir;
 }
 
+/** Bundles the npm wrapper (TypeScript sources → dist) via tsdown. Requires
+ * Node >= 22.18 at build time; the emitted output still targets Node 18. */
+async function buildWrapperDist(root: string): Promise<void> {
+  if (!existsSync(join(root, "node_modules", ".bin", "tsdown")))
+    fail("tsdown not installed — run `bun install` first");
+  await run("bun", ["run", "npm:build"], { cwd: root });
+}
+
 async function buildMainPackage(version: string, releaseDir: string): Promise<string> {
+  const root = join(import.meta.dir, "..");
+  await buildWrapperDist(root);
+
   const pkgDir = join(releaseDir, "packages", "@shiinasaku/hayate");
   rmSync(pkgDir, { recursive: true, force: true });
   mkdirSync(pkgDir, { recursive: true });
@@ -385,22 +396,22 @@ async function buildMainPackage(version: string, releaseDir: string): Promise<st
   baseJson.version = version;
   baseJson.optionalDependencies = optionalDependencies;
   delete baseJson["//"];
+  delete baseJson.scripts; // build tooling must not ship in the published package
 
   writeFileSync(join(pkgDir, "package.json"), JSON.stringify(baseJson, null, 2) + "\n", "utf8");
 
-  // Copy wrapper files.
-  await Bun.write(
-    join(pkgDir, "index.js"),
-    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "index.js")),
-  );
+  // Copy wrapper files (tsdown output; layout kept: index.js + bin/hayate.js).
+  const wrapperDist = join(root, "npm", "hayate", "dist");
+  await Bun.write(join(pkgDir, "index.js"), Bun.file(join(wrapperDist, "index.js")));
+  await Bun.write(join(pkgDir, "index.d.ts"), Bun.file(join(wrapperDist, "index.d.ts")));
   mkdirSync(join(pkgDir, "bin"), { recursive: true });
   await Bun.write(
     join(pkgDir, "bin", "hayate.js"),
-    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "bin", "hayate.js")),
+    Bun.file(join(wrapperDist, "bin", "hayate.js")),
   );
   await Bun.write(
     join(pkgDir, "README.md"),
-    Bun.file(join(import.meta.dir, "..", "npm", "hayate", "README.md")),
+    Bun.file(join(root, "npm", "hayate", "README.md")),
   );
 
   return pkgDir;
