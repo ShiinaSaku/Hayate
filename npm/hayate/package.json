@@ -17,13 +17,21 @@
   },
   "files": [
     "index.js",
+    "index.d.ts",
     "bin/",
     "README.md"
   ],
   "type": "module",
   "main": "./index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./index.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsdown"
   },
   "optionalDependencies": {
     "@shiinasaku/hayate-android-arm64": "6.0.0",

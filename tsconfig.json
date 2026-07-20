@@ -27,5 +27,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["build.ts", "scripts/**/*.mts", "npm/**/*.js"]
+  "include": ["build.ts", "scripts/**/*.mts", "npm/**/*.js", "npm/hayate/src/**/*.ts"]
 }

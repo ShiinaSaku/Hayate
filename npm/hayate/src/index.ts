@@ -1,17 +1,25 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
 import os from "node:os";
+import { dirname, resolve } from "node:path";
 
-/**
- * @typedef {Object} Target
- * @property {PlatformKey} key
- * @property {string} name
- */
+interface Target {
+  key: PlatformKey;
+  name: string;
+}
 
-/** @type {Target[]} */
-const TARGETS = [
+type PlatformKey =
+  | "darwin-x64"
+  | "darwin-arm64"
+  | "linux-x64"
+  | "linux-arm64"
+  | "win32-x64"
+  | "win32-arm64"
+  | "android-x64"
+  | "android-arm64";
+
+const TARGETS: Target[] = [
   { key: "darwin-x64", name: "@shiinasaku/hayate-darwin-x64" },
   { key: "darwin-arm64", name: "@shiinasaku/hayate-darwin-arm64" },
   { key: "linux-x64", name: "@shiinasaku/hayate-linux-x64" },
@@ -22,7 +30,7 @@ const TARGETS = [
   { key: "android-arm64", name: "@shiinasaku/hayate-android-arm64" },
 ];
 
-const BINARY_NAMES = {
+const BINARY_NAMES: Record<PlatformKey, string> = {
   "darwin-x64": "hayate",
   "darwin-arm64": "hayate",
   "linux-x64": "hayate",
@@ -36,12 +44,10 @@ const BINARY_NAMES = {
 /**
  * Detect whether the current process is running under Android (e.g. Termux).
  *
- * `process.platform` reports `linux` on Android, so extra signals are needed to
- * distinguish it from a normal Linux host.
- *
- * @returns {boolean}
+ * `process.platform` reports `linux` on Android, so extra signals are needed
+ * to distinguish it from a normal Linux host.
  */
-export function isAndroid() {
+export function isAndroid(): boolean {
   if (process.platform !== "linux") return false;
   if (process.env.ANDROID_ROOT || process.env.ANDROID_DATA) return true;
   try {
@@ -54,22 +60,14 @@ export function isAndroid() {
   }
 }
 
-/**
- * Return the platform key for the current host, accounting for Android.
- *
- * @returns {string}
- */
-function hostKey() {
+/** Platform key for the current host, accounting for Android. */
+function hostKey(): string {
   if (isAndroid()) return `android-${process.arch}`;
   return `${process.platform}-${process.arch}`;
 }
 
-/**
- * Return the npm package name for the current host platform/architecture.
- *
- * @returns {string}
- */
-export function pkgName() {
+/** npm package name carrying the prebuilt binary for this host. */
+export function pkgName(): string {
   const key = hostKey();
   const target = TARGETS.find((t) => t.key === key);
   if (!target) {
@@ -83,17 +81,15 @@ export function pkgName() {
 }
 
 /**
- * Return the absolute path to the native `hayate` binary installed by the
- * optional platform dependency.
- *
- * @returns {Promise<string>}
+ * Absolute path to the native `hayate` binary installed by the optional
+ * platform dependency.
  */
-export async function binaryPath() {
+export async function binaryPath(): Promise<string> {
   const name = pkgName();
   const require = createRequire(import.meta.url);
   const pkgJsonPath = require.resolve(`${name}/package.json`);
-  const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
-  const key = hostKey();
+  const pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8")) as { binary?: string };
+  const key = hostKey() as PlatformKey;
   const binary = pkgJson.binary ?? BINARY_NAMES[key];
   if (!binary) {
     throw new Error(`Unknown binary name for ${process.platform} ${process.arch}`);
