@@ -1,0 +1,21 @@
+diff --git a/dist/plugins/cargo.js b/dist/plugins/cargo.js
+index 8d06464d1b784025b876173d8ae900c57a8c68ab..fd7f9134389cc294e82af397f4c4a79a3a83b044 100644
+--- a/dist/plugins/cargo.js
++++ b/dist/plugins/cargo.js
+@@ -640,8 +640,16 @@ function cargo({ updateLockFile = true, bumpDep: getBumpDepType } = {}) {
+ 		async applyDraft(draft) {
+ 			if (!this.cargo) return;
+ 			const graph = this.cargo.graph;
++			// Compute every bump from ORIGINAL versions before writing: packages
++			// with `version.workspace = true` share one workspace version cell, so
++			// a write would corrupt the next package's bump (5.1.1 -> 6.0.0 -> 7.0.0).
++			const bumps = /* @__PURE__ */ new Map();
+ 			for (const pkg of graph.packages.values()) {
+ 				const bumped = draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
++				if (bumped) bumps.set(pkg.id, bumped);
++			}
++			for (const pkg of graph.packages.values()) {
++				const bumped = bumps.get(pkg.id);
+ 				if (bumped) pkg.setVersion(bumped);
+ 			}
+ 			for (const file of graph.files.values()) for (const { range, resolved, setRange } of file.listDependencies(graph)) {
