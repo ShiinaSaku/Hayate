@@ -10,7 +10,15 @@
  * `--tag hayate@6.0.0`.
  */
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -409,10 +417,7 @@ async function buildMainPackage(version: string, releaseDir: string): Promise<st
     join(pkgDir, "bin", "hayate.js"),
     Bun.file(join(wrapperDist, "bin", "hayate.js")),
   );
-  await Bun.write(
-    join(pkgDir, "README.md"),
-    Bun.file(join(root, "npm", "hayate", "README.md")),
-  );
+  await Bun.write(join(pkgDir, "README.md"), Bun.file(join(root, "npm", "hayate", "README.md")));
 
   return pkgDir;
 }
