@@ -58,14 +58,14 @@ jobs:
 
       - name: Install Android NDK
         if: matrix.android
-        uses: nttld/setup-ndk@f2c78c9639b9d4f6d112f46e14b5e1a7f5c4a52d # v1
+        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
         id: setup-ndk
         with:
           # Pin to the latest r29 patch. Bump when a newer NDK is released.
           ndk-version: r29b
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@f4d14e0e986089f467af9291c2a2899ff1d9eb61 # v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
 
