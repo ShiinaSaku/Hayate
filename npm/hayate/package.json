@@ -33,6 +33,9 @@
   "scripts": {
     "build": "tsdown"
   },
+  "devDependencies": {
+    "tsdown": "0.22.12"
+  },
   "optionalDependencies": {
     "@shiinasaku/hayate-android-arm64": "6.0.0",
     "@shiinasaku/hayate-android-x64": "6.0.0",
