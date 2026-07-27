@@ -25,7 +25,7 @@ hayate = { path = "../hayate", version = "6.1.0" }
 anyhow = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"
-clap_mangen = "0.2"
+clap_mangen = "0.3"
 compio = { workspace = true }
 compio-quic = { workspace = true }
 console = { workspace = true }
