@@ -35,7 +35,7 @@ if-addrs = { workspace = true }
 indicatif = { workspace = true }
 inquire = { workspace = true }
 crossterm = { version = "0.29", default-features = false, features = ["events"] }
-dirs = "6"
+dirs = "7"
 libc = "0.2"
 rand = { workspace = true }
 serde = { version = "1", features = ["derive"] }
