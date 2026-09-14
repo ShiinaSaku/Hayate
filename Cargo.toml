@@ -30,7 +30,7 @@ ring = { version = "0.17" }
 socket2 = { version = "0.6" }
 
 # Data handling and diagnostics.
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 anyhow = "1"
 thiserror = "2"
 blake3 = "1.8"
