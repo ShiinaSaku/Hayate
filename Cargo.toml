@@ -41,7 +41,7 @@ tar = "0.4"
 walkdir = "2"
 if-addrs = "0.15"
 flume = "0.12.0"
-mdns-sd = { version = "0.20", default-features = false }
+mdns-sd = { version = "0.21", default-features = false }
 clap = { version = "4", features = ["color", "derive", "env"] }
 console = "0.16"
 indicatif = { version = "0.18", features = ["improved_unicode"] }
