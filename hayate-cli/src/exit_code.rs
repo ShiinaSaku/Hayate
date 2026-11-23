@@ -79,8 +79,9 @@ impl CliExitCode {
     pub fn exit(self) -> ! {
         #[cfg(unix)]
         if self == CliExitCode::Interrupted {
-            // SAFETY: restoring the default SIGINT handler then re-raising is the
-            // standard way to report 130 to the parent shell after we handled Ctrl+C.
+            // SAFETY: restoring the default SIGINT handler then re-raising is
+            // the standard way to report 130 to the parent shell after we
+            // handled Ctrl+C.
             unsafe {
                 let _ = libc::signal(libc::SIGINT, libc::SIG_DFL);
                 let _ = libc::raise(libc::SIGINT);

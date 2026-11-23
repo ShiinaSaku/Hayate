@@ -1,7 +1,8 @@
 //! `hayate receive` subcommand.
 
+use std::io::IsTerminal;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,10 +17,17 @@ use crate::ui::{PathCompleter, TransferUi};
 use crate::{history, output};
 
 pub async fn run(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
-    // ESC / q listener — polls tty in raw mode, exits cleanly via cancelled flag.
-    spawn_esc_listener(Arc::clone(&cancelled));
+    // ESC / q listener — polls tty in raw mode, exits cleanly via cancelled
+    // flag. Only meaningful on a real terminal; spawning it for piped stdin
+    // burns a thread and can toggle raw mode inside scripts.
+    if std::io::stdin().is_terminal() {
+        spawn_esc_listener(Arc::clone(&cancelled));
+    }
 
-    if let Some(code) = args.code.clone() {
+    ensure_output_dir(&args.output)?;
+
+    if let Some(code) = args.code.as_deref() {
+        let code = crate::subcmd::normalize_code(code)?;
         return run_pairing(code, args, cancelled).await;
     }
 
@@ -74,7 +82,7 @@ fn report_receive_success(outcome: &ReceiveOutcome, ui: &TransferUi) {
         outcome.meta.total_size,
         elapsed,
         &outcome.checksum,
-        false,
+        outcome.compressed,
         output::cipher_name(outcome.cipher_id),
     );
     output::integrity_verified(&outcome.checksum);
@@ -90,24 +98,95 @@ fn report_receive_success(outcome: &ReceiveOutcome, ui: &TransferUi) {
     );
 }
 
+/// What to do when the destination path already exists.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OverwritePolicy {
+    /// Prompt on a terminal, otherwise refuse the transfer.
+    Ask,
+    /// Replace the existing path without asking.
+    Allow,
+    /// Refuse the transfer.
+    Deny,
+}
+
+fn overwrite_policy(args: &ReceiveArgs) -> OverwritePolicy {
+    if args.overwrite {
+        OverwritePolicy::Allow
+    } else if args.no_overwrite {
+        OverwritePolicy::Deny
+    } else {
+        OverwritePolicy::Ask
+    }
+}
+
 /// Builds the consent closure shared by both receive modes: auto-accept
-/// resolves directly, otherwise suspend bars and prompt.
+/// resolves directly, otherwise suspend bars and prompt. The resolved path is
+/// then checked against the overwrite policy so an existing file is never
+/// truncated silently.
 fn make_consent(
     auto_accept: bool,
     output_dir: PathBuf,
+    policy: OverwritePolicy,
+    resume: bool,
     prompt_error: Arc<Mutex<Option<anyhow::Error>>>,
 ) -> impl FnOnce(&Metadata, SocketAddr) -> Option<PathBuf> {
     move |meta, peer| {
-        if auto_accept {
-            return Some(resolve_output(&output_dir, meta));
-        }
-        match output::suspend_for_prompt(|| prompt_accept(meta, peer, &output_dir)) {
-            Ok(path) => path,
+        let dest = if auto_accept {
+            Some(resolve_output(&output_dir, meta))
+        } else {
+            match output::suspend_for_prompt(|| prompt_accept(meta, peer, &output_dir)) {
+                Ok(path) => path,
+                Err(e) => {
+                    *prompt_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(e);
+                    return None;
+                },
+            }
+        }?;
+
+        // Only single-file transfers can append to an existing partial file;
+        // directories always extract into a fresh (or merged) tree.
+        let can_resume = resume && meta.transfer_type == TransferKind::File;
+        match confirm_overwrite(&dest, policy, can_resume) {
+            Ok(true) => Some(dest),
+            Ok(false) => None,
             Err(e) => {
                 *prompt_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(e);
                 None
             },
         }
+    }
+}
+
+/// Ensures the destination can be written: creates missing output directories
+/// and rejects paths that exist but are not directories.
+fn ensure_output_dir(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("could not create output directory {}", dir.display()))?;
+    if !dir.is_dir() {
+        bail!("output path {} is not a directory", dir.display());
+    }
+    Ok(())
+}
+
+/// Applies the overwrite policy to an already-resolved destination path.
+fn confirm_overwrite(dest: &Path, policy: OverwritePolicy, can_resume: bool) -> Result<bool> {
+    if policy == OverwritePolicy::Allow || can_resume || !dest.exists() {
+        return Ok(true);
+    }
+    if policy == OverwritePolicy::Deny || !output::is_tty() {
+        output::warn(&format!(
+            "{} already exists; pass --overwrite to replace it or --resume to continue a partial transfer",
+            dest.display()
+        ));
+        return Ok(false);
+    }
+
+    let prompt = format!("   {} exists. Overwrite?", dest.display());
+    match output::suspend_for_prompt(|| inquire::Confirm::new(&prompt).with_default(false).prompt())
+    {
+        Ok(value) => Ok(value),
+        Err(inquire::InquireError::OperationInterrupted) => Ok(false),
+        Err(e) => Err(anyhow::anyhow!(e)),
     }
 }
 
@@ -138,12 +217,15 @@ async fn run_pairing(code: String, args: ReceiveArgs, cancelled: Arc<AtomicBool>
     let ui = TransferUi::new(Arc::clone(&cancelled), args.no_progress);
     let auto_accept = args.auto_accept;
     let output_dir = args.output.clone();
+    let policy = overwrite_policy(&args);
+    let resume = args.resume;
     let prompt_error: Arc<Mutex<Option<anyhow::Error>>> = Arc::new(Mutex::new(None));
 
-    let mut builder = HayateReceiver::new().code(code).resume(args.resume);
-    if auto_accept {
-        builder = builder.auto_accept(true);
-    }
+    // Deliberately leave the engine's `auto_accept` off: the library
+    // short-circuits the consent callback in that mode, which would bypass the
+    // overwrite policy. `make_consent` already resolves paths without a prompt
+    // when `--auto-accept` is set.
+    let builder = HayateReceiver::new().code(code).resume(args.resume);
 
     let outcome = builder
         .receive_with(
@@ -174,7 +256,13 @@ async fn run_pairing(code: String, args: ReceiveArgs, cancelled: Arc<AtomicBool>
                     Ok(())
                 }
             },
-            make_consent(auto_accept, output_dir.clone(), Arc::clone(&prompt_error)),
+            make_consent(
+                auto_accept,
+                output_dir.clone(),
+                policy,
+                resume,
+                Arc::clone(&prompt_error),
+            ),
             make_progress(&ui),
         )
         .await;
@@ -190,8 +278,9 @@ async fn run_pairing(code: String, args: ReceiveArgs, cancelled: Arc<AtomicBool>
             if let Some(error) = take_prompt_error(&prompt_error) {
                 return Err(error).context("receive prompt failed");
             }
-            output::warn("Transfer rejected.");
-            Ok(())
+            // A rejected offer is a documented non-zero outcome (exit code 3),
+            // not a successful command.
+            Err(EngineError::TransferRejected.into())
         },
         Err(EngineError::Cancelled(_)) => {
             ui.clear_all();
@@ -210,12 +299,17 @@ async fn run_pairing(code: String, args: ReceiveArgs, cancelled: Arc<AtomicBool>
 
 async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     let bind_addr = SocketAddr::new(args.bind, args.port);
-    let mut builder = HayateReceiver::new().bind(bind_addr).resume(args.resume);
-    if args.auto_accept {
-        builder = builder.auto_accept(true);
-    }
+    // See the note in `run_pairing`: the consent callback owns auto-accept so
+    // the overwrite policy is always applied.
+    let builder = HayateReceiver::new().bind(bind_addr).resume(args.resume);
     let listener = builder.listen().await.context("Failed to bind listener")?;
-    let local_port = listener.local_addr()?.port();
+    let local_addr = listener.local_addr()?;
+    let local_port = local_addr.port();
+
+    // Advertise the receiver so `hayate discover` and `send --pick` find it
+    // without sweeping the subnet. Best-effort: discovery must never block
+    // receiving.
+    let _announcer = hayate::discovery::start_announcer(local_addr).ok();
 
     if bind_addr.ip().is_unspecified() {
         output::print_bound(format!("0.0.0.0:{local_port}"));
@@ -243,6 +337,8 @@ async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()>
 
     let auto_accept = args.auto_accept;
     let output_dir = args.output.clone();
+    let policy = overwrite_policy(&args);
+    let resume = args.resume;
 
     let waiting: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(if args.no_progress {
         None
@@ -277,7 +373,13 @@ async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()>
                         Ok(())
                     }
                 },
-                make_consent(auto_accept, output_dir.clone(), Arc::clone(&prompt_error)),
+                make_consent(
+                    auto_accept,
+                    output_dir.clone(),
+                    policy,
+                    resume,
+                    Arc::clone(&prompt_error),
+                ),
                 make_progress(&ui),
             )
             .await;
@@ -298,6 +400,9 @@ async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()>
                     return Err(error).context("receive prompt failed");
                 }
                 output::warn("Transfer rejected.");
+                if args.once {
+                    return Err(EngineError::TransferRejected.into());
+                }
                 respawn_waiting(args.no_progress, &waiting);
                 continue;
             },
@@ -320,12 +425,19 @@ async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()>
                     return Err(error).context("receive prompt failed");
                 }
                 output::err(&format!("{e}"));
+                if args.once {
+                    return Err(e).context("receive failed");
+                }
                 respawn_waiting(args.no_progress, &waiting);
                 continue;
             },
         }
     }
 
+    if cancelled.load(Ordering::SeqCst) {
+        // Ctrl+C / Esc / q: exit non-zero instead of reporting success.
+        bail!("cancelled");
+    }
     Ok(())
 }
 
@@ -383,6 +495,7 @@ fn prompt_accept(
         };
 
         let dest = PathBuf::from(dest_dir);
+        ensure_output_dir(&dest)?;
         let name = std::path::Path::new(&meta.filename)
             .file_name()
             .unwrap_or_else(|| std::ffi::OsStr::new("received_file"));

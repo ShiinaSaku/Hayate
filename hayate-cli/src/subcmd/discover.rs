@@ -1,12 +1,16 @@
 //! `hayate discover` subcommand.
 //!
-//! Probes every host in the local subnet for active Hayate receivers. Uses
-//! high-concurrency QUIC probes with RTT measurement and real-time result
-//! streaming so peers appear as they are discovered rather than waiting for
-//! the full scan to complete.
+//! Discovery has three layers, cheapest first:
 //!
-//! The scan core ([`scan_for_peers`]) is shared with `hayate send --pick`,
-//! which reuses it to build an interactive receiver picker.
+//! 1. **mDNS browse** — receivers and pairing senders register
+//!    `_hayate._udp.local.`, so browsing finds them without any scanning.
+//! 2. **UDP query** — a broadcast `HAYATE_DISCOVER:v1` packet that receivers
+//!    answer unicast. Works on networks that block mDNS and costs two packets.
+//! 3. **QUIC subnet sweep** — probes every host in each local network. Only
+//!    used with `--scan`, an explicit `--cidr`, or when the fast layers found
+//!    nothing.
+//!
+//! The sweep core ([`scan_for_peers`]) is shared with `hayate send --pick`.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -14,9 +18,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures_util::stream::{self, StreamExt};
-use hayate::local_addr;
+use hayate::discovery::DiscoveredPeer;
+use hayate::local_addr::Ipv4Network;
 
 use crate::cli::DiscoverArgs;
 use crate::output;
@@ -24,16 +29,28 @@ use crate::output;
 const DEFAULT_PORT: u16 = 50001;
 const CONCURRENCY: usize = 128;
 
-/// A receiver found by a subnet scan.
+/// Upper bound on hosts swept by a subnet scan.
+///
+/// A /16 has 65k hosts; probing all of them is slow and noisy. The cap keeps a
+/// mistaken CIDR from turning `discover` into a port scanner; the remainder is
+/// reported so the user can narrow with `--cidr`.
+const MAX_SCAN_HOSTS: u64 = 4096;
+
+/// Budget for the fast (mDNS + UDP query) phase.
+const FAST_DISCOVERY: Duration = Duration::from_secs(3);
+
+/// A receiver found by discovery or a subnet scan.
 pub struct FoundPeer {
-    /// Display name ("Hayate Peer" / "Local Instance").
+    /// Display name ("Hayate Peer" / hostname).
     pub name: String,
     /// Reachable address of the peer.
     pub addr: SocketAddr,
     /// Peer OS when known, else "unknown".
     pub os: String,
-    /// QUIC handshake round-trip time in milliseconds.
-    pub rtt_ms: f64,
+    /// QUIC handshake round-trip time in milliseconds, when measured.
+    pub rtt_ms: Option<f64>,
+    /// Version reported by the peer, when known.
+    pub version: String,
 }
 
 /// Result of probing a single host.
@@ -42,36 +59,120 @@ struct ProbeOutcome {
     name: String,
     resolved_ip: IpAddr,
     rtt_ms: f64,
-    os: String,
 }
 
 pub async fn run(args: DiscoverArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
-    let peers = scan_for_peers(args.timeout, args.cidr.as_deref(), cancelled, true, |peer| {
-        let rtt_str = format_rtt(peer.rtt_ms);
-        output::peer_found_live(
-            &peer.name,
-            &peer.addr,
-            &peer.os,
-            &rtt_str,
-            quality_indicator(peer.rtt_ms),
+    let fast_budget = FAST_DISCOVERY.min(Duration::from_secs(args.timeout.max(1)));
+    let mut peers = fast_discover(fast_budget).await;
+    for peer in &peers {
+        announce_live(peer);
+    }
+
+    // Fall back to a sweep when the cheap layers found nothing, or whenever the
+    // user asked for one explicitly.
+    if !cancelled.load(Ordering::SeqCst) && (args.scan || args.cidr.is_some() || peers.is_empty()) {
+        let swept = scan_for_peers(
+            args.timeout.max(1),
+            args.cidr.as_deref(),
+            Arc::clone(&cancelled),
+            true,
+            announce_live,
+        )
+        .await?;
+        merge_peers(&mut peers, swept);
+    }
+
+    let rows: Vec<(String, SocketAddr, String)> =
+        peers.iter().map(|p| (p.name.clone(), p.addr, os_label(p))).collect();
+    output::print_peer_table(&rows);
+
+    if peers.is_empty() {
+        output::info(
+            "No Hayate peers found. Start one with `hayate receive`, or try --scan to sweep the subnet.",
         );
-    })
-    .await?;
-
-    // Convert to the table format for final display
-    let peers: Vec<(String, SocketAddr, String)> =
-        peers.into_iter().map(|p| (p.name, p.addr, p.os)).collect();
-
-    output::print_peer_table(&peers);
-
-    if !peers.is_empty() {
+    } else {
         output::info("Tip: run `hayate receive` to start accepting transfers.");
     }
 
     Ok(())
 }
 
-/// Scans local subnets for Hayate receivers.
+/// Collects peers from mDNS and the UDP discovery query in parallel.
+pub(crate) async fn fast_discover(timeout: Duration) -> Vec<FoundPeer> {
+    let query = compio::runtime::spawn_blocking(move || hayate::discovery::query(timeout));
+    let browse = compio::runtime::spawn_blocking(move || hayate::discovery::scan(timeout));
+    let (queried, browsed) = futures_util::future::join(query, browse).await;
+
+    let queried = queried.ok().and_then(Result::ok).unwrap_or_default();
+    let browsed = browsed.ok().and_then(Result::ok).unwrap_or_default();
+
+    let mut peers: Vec<FoundPeer> = Vec::new();
+    for peer in queried.into_iter().chain(browsed) {
+        push_unique(&mut peers, from_discovered(peer));
+    }
+    peers
+}
+
+/// Adds a peer unless an equivalent one is already known.
+///
+/// A receiver bound to all interfaces answers both the loopback and broadcast
+/// query from the same machine, yielding `127.0.0.1:p` and `<lan-ip>:p`.
+/// Collapse those into one row, preferring the routable address.
+fn push_unique(peers: &mut Vec<FoundPeer>, peer: FoundPeer) {
+    if let Some(existing) = peers
+        .iter_mut()
+        .find(|p| p.addr.port() == peer.addr.port() && p.name == peer.name && p.os == peer.os)
+    {
+        if existing.addr.ip().is_loopback() && !peer.addr.ip().is_loopback() {
+            *existing = peer;
+        }
+        return;
+    }
+    peers.push(peer);
+}
+
+fn from_discovered(peer: DiscoveredPeer) -> FoundPeer {
+    FoundPeer {
+        name: peer.name,
+        addr: peer.addr,
+        os: peer.os,
+        rtt_ms: peer.rtt_ms,
+        version: peer.version,
+    }
+}
+
+fn merge_peers(peers: &mut Vec<FoundPeer>, extra: Vec<FoundPeer>) {
+    for peer in extra {
+        let duplicate = peers.iter().any(|known| {
+            known.addr.port() == peer.addr.port()
+                && (known.addr.ip() == peer.addr.ip()
+                    || (known.addr.ip().is_loopback()
+                        && hayate::local_addr::is_local_ip(peer.addr.ip()))
+                    || (peer.addr.ip().is_loopback()
+                        && hayate::local_addr::is_local_ip(known.addr.ip())))
+        });
+        if !duplicate {
+            // Sweep results are anonymous; give them a usable label.
+            peers.push(peer);
+        }
+    }
+}
+
+fn announce_live(peer: &FoundPeer) {
+    let rtt = format_rtt(peer.rtt_ms);
+    output::peer_found_live(&peer.name, &peer.addr, &peer.os, &rtt, quality_indicator(peer.rtt_ms));
+}
+
+/// OS column text, including the peer version when it is known.
+fn os_label(peer: &FoundPeer) -> String {
+    if peer.version.is_empty() || peer.version == "unknown" {
+        peer.os.clone()
+    } else {
+        format!("{} {}", peer.os, peer.version)
+    }
+}
+
+/// Sweeps local subnets with QUIC probes for Hayate receivers.
 ///
 /// `on_found` fires (from the collector task) for each newly discovered peer,
 /// enabling live UIs. When `show_progress` is set a scan progress bar is drawn
@@ -83,43 +184,35 @@ pub async fn scan_for_peers(
     show_progress: bool,
     on_found: impl Fn(&FoundPeer),
 ) -> Result<Vec<FoundPeer>> {
-    let subnets = if let Some(cidr) = cidr { parse_cidr(cidr)? } else { detect_all_subnets() };
+    let networks = match cidr {
+        Some(cidr) => vec![parse_cidr(cidr)?],
+        None => detect_networks(),
+    };
 
-    if subnets.is_empty() {
+    if networks.is_empty() {
         output::warn("No local subnets detected. Loopback only. Use --cidr to specify a subnet.");
     } else {
-        output::info(&format!("Scanning {} subnet(s) with {timeout_secs}s timeout", subnets.len()));
+        let list = networks
+            .iter()
+            .map(|n| format!("{}/{}", n.base, n.prefix))
+            .collect::<Vec<_>>()
+            .join(", ");
+        output::info(&format!("Scanning {list} with {timeout_secs}s timeout"));
     }
 
     let timeout = Duration::from_secs(timeout_secs);
+    let (mut targets, skipped) = build_targets(&networks, DEFAULT_PORT);
+    if skipped > 0 {
+        output::warn(&format!(
+            "Sweeping the first {MAX_SCAN_HOSTS} of {} hosts; narrow with --cidr to cover the rest.",
+            targets.len() as u64 + skipped
+        ));
+    }
 
-    let mut targets: Vec<SocketAddr> = subnets
-        .iter()
-        .flat_map(|base| {
-            let octets = base.octets();
-            // Prioritise common gateway-adjacent addresses (.1-.10, .254) first,
-            // then sweep the remaining host range.
-            let priority = [1u8, 2, 3, 254, 253];
-            let priority_set: HashSet<u8> = priority.iter().copied().collect();
-            let mut hosts: Vec<u8> = priority.to_vec();
-            for h in 4u8..=252 {
-                if !priority_set.contains(&h) {
-                    hosts.push(h);
-                }
-            }
-            hosts.into_iter().map(move |host| {
-                SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::new(octets[0], octets[1], octets[2], host)),
-                    DEFAULT_PORT,
-                )
-            })
-        })
-        .collect();
-
-    // Always scan loopback (same-machine multi-tab discovery)
-    let has_loopback = targets.iter().any(|t| t.ip().is_loopback());
-    if !has_loopback {
-        targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_PORT));
+    // Always probe loopback (same-machine multi-instance discovery).
+    let loopback = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DEFAULT_PORT);
+    if !targets.contains(&loopback) {
+        targets.push(loopback);
     }
 
     let total_targets = targets.len() as u64;
@@ -182,8 +275,9 @@ pub async fn scan_for_peers(
         let found = FoundPeer {
             name: peer.name,
             addr: SocketAddr::new(peer.resolved_ip, peer.addr.port()),
-            os: peer.os,
-            rtt_ms: peer.rtt_ms,
+            os: "unknown".to_owned(),
+            rtt_ms: Some(peer.rtt_ms),
+            version: "unknown".to_owned(),
         };
         on_found(&found);
         discovered.push(found);
@@ -200,43 +294,34 @@ pub async fn scan_for_peers(
 // Subnet helpers
 // ---------------------------------------------------------------------------
 
-fn parse_cidr(cidr: &str) -> Result<Vec<Ipv4Addr>> {
-    let parts: Vec<&str> = cidr.split('/').collect();
-    if parts.len() != 2 {
-        anyhow::bail!("invalid CIDR: {cidr}");
-    }
-    let base: Ipv4Addr = parts[0].parse()?;
-    let prefix: u8 = parts[1].parse()?;
-    if ![16, 24].contains(&prefix) {
-        anyhow::bail!("only /24 and /16 CIDR prefixes are supported for scanning");
-    }
-    let o = base.octets();
-    if prefix == 24 {
-        Ok(vec![Ipv4Addr::new(o[0], o[1], o[2], 0)])
-    } else {
-        let mut subnets = Vec::with_capacity(256);
-        for third in 0u8..=255 {
-            subnets.push(Ipv4Addr::new(o[0], o[1], third, 0));
-        }
-        Ok(subnets)
-    }
+fn parse_cidr(cidr: &str) -> Result<Ipv4Network> {
+    Ipv4Network::parse_cidr(cidr).with_context(|| {
+        format!("invalid CIDR \"{cidr}\" (expected e.g. 192.168.1.0/24 or 10.0.0.0/16)")
+    })
 }
 
-/// Detect all local subnets by combining interface info, route probes, and
-/// fallback common private ranges.
-fn detect_all_subnets() -> Vec<Ipv4Addr> {
-    let mut bases = local_addr::local_subnets();
+/// Detects local networks using the real interface netmasks.
+fn detect_networks() -> Vec<Ipv4Network> {
+    hayate::local_addr::local_networks()
+}
 
-    if bases.is_empty() {
-        bases.extend([
-            Ipv4Addr::new(192, 168, 1, 0),
-            Ipv4Addr::new(192, 168, 0, 0),
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(172, 16, 0, 0),
-        ]);
+/// Expands networks into probe targets, capped at [`MAX_SCAN_HOSTS`].
+fn build_targets(networks: &[Ipv4Network], port: u16) -> (Vec<SocketAddr>, u64) {
+    let total: u64 = networks.iter().map(Ipv4Network::host_count).sum();
+    let capacity = total.min(MAX_SCAN_HOSTS) as usize + 1;
+    let mut targets = Vec::with_capacity(capacity);
+
+    'outer: for network in networks {
+        for ip in network.hosts() {
+            if targets.len() as u64 >= MAX_SCAN_HOSTS {
+                break 'outer;
+            }
+            targets.push(SocketAddr::new(IpAddr::V4(ip), port));
+        }
     }
 
-    bases
+    let skipped = total.saturating_sub(targets.len() as u64);
+    (targets, skipped)
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +335,7 @@ async fn probe_one_with_rtt(addr: SocketAddr, timeout: Duration) -> Option<Probe
     let start = Instant::now();
     let result = compio::time::timeout(timeout, async move {
         let client_cfg = hayate::network::client_config().ok()?;
-        let endpoint = hayate::network::bind_client().await.ok()?;
+        let endpoint = hayate::network::bind_client_for(addr).await.ok()?;
         let conn = endpoint.connect(addr, "hayate.local", Some(client_cfg)).ok()?.await.ok()?;
         conn.close(0u32.into(), b"discover");
         let elapsed = start.elapsed();
@@ -264,24 +349,26 @@ async fn probe_one_with_rtt(addr: SocketAddr, timeout: Duration) -> Option<Probe
         Some(elapsed) => {
             let rtt_ms = elapsed.as_secs_f64() * 1000.0;
             let ip = addr.ip();
-            let is_local = ip.is_loopback() || local_addr::is_local_ip(ip);
+            let is_local = ip.is_loopback() || hayate::local_addr::is_local_ip(ip);
             let name =
                 if is_local { "Local Instance".to_owned() } else { "Hayate Peer".to_owned() };
             let resolved_ip = if is_local {
-                local_addr::primary_local_ipv4().map(IpAddr::V4).unwrap_or(ip)
+                hayate::local_addr::primary_local_ipv4().map(IpAddr::V4).unwrap_or(ip)
             } else {
                 ip
             };
-            let os = if is_local { std::env::consts::OS.to_owned() } else { "unknown".to_owned() };
 
-            Some(ProbeOutcome { addr, name, resolved_ip, rtt_ms, os })
+            Some(ProbeOutcome { addr, name, resolved_ip, rtt_ms })
         },
         None => None,
     }
 }
 
 /// Formats round-trip time in a human-readable way.
-fn format_rtt(rtt_ms: f64) -> String {
+fn format_rtt(rtt_ms: Option<f64>) -> String {
+    let Some(rtt_ms) = rtt_ms else {
+        return "—".to_owned();
+    };
     if rtt_ms < 1.0 {
         format!("{:.0}µs", rtt_ms * 1000.0)
     } else if rtt_ms < 10.0 {
@@ -292,14 +379,12 @@ fn format_rtt(rtt_ms: f64) -> String {
 }
 
 /// Returns a quality indicator character based on RTT.
-fn quality_indicator(rtt_ms: f64) -> &'static str {
-    if rtt_ms < 2.0 {
-        "●" // excellent
-    } else if rtt_ms < 10.0 {
-        "◉" // good
-    } else if rtt_ms < 50.0 {
-        "◎" // fair
-    } else {
-        "○" // poor
+fn quality_indicator(rtt_ms: Option<f64>) -> &'static str {
+    match rtt_ms {
+        Some(ms) if ms < 2.0 => "●",  // excellent
+        Some(ms) if ms < 10.0 => "◉", // good
+        Some(ms) if ms < 50.0 => "◎", // fair
+        Some(_) => "○",               // poor
+        None => "○",                  // not measured
     }
 }

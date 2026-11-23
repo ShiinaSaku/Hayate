@@ -21,18 +21,26 @@ mod tests {
         cmd
     }
 
-    /// Locates the built `hayate` binary: `CARGO_BIN_EXE` in integration-test
-    /// contexts, otherwise the sibling of the test binary in `target/<prof>`.
+    /// Locates the built `hayate` binary.
+    ///
+    /// `CARGO_BIN_EXE_hayate` is only defined for integration tests, so unit
+    /// tests have to locate the artifact themselves. Do not assume
+    /// `target/<profile>/deps/`: current cargo keeps intermediate artifacts
+    /// under `target/<profile>/build/<pkg>/<hash>/out/`, so walk ancestors and
+    /// take the first sibling executable named `hayate`.
     fn hayate_bin() -> std::path::PathBuf {
         if let Some(path) = option_env!("CARGO_BIN_EXE_hayate") {
             return path.into();
         }
-        let mut dir = std::env::current_exe().expect("test binary path");
-        dir.pop(); // …/deps
-        dir.pop(); // …/<profile>
-        dir.push(if cfg!(windows) { "hayate.exe" } else { "hayate" });
-        assert!(dir.exists(), "hayate binary not found at {}", dir.display());
-        dir
+        let name = if cfg!(windows) { "hayate.exe" } else { "hayate" };
+        let exe = std::env::current_exe().expect("test binary path");
+        for dir in exe.ancestors().skip(1) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        panic!("hayate binary not found near {}", exe.display());
     }
 
     #[test]
@@ -43,6 +51,34 @@ mod tests {
             .assert()
             .success()
             .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn version_flags_only_count_before_a_subcommand() {
+        let args = |v: &[&str]| -> Vec<String> {
+            std::iter::once("hayate".to_owned()).chain(v.iter().map(|s| (*s).to_owned())).collect()
+        };
+        assert_eq!(crate::version_request(&args(&["-V"])), Some(true));
+        assert_eq!(crate::version_request(&args(&["--version"])), Some(false));
+        assert_eq!(crate::version_request(&args(&["--color", "never", "--version"])), Some(false));
+        assert_eq!(crate::version_request(&args(&["send", "-V"])), None);
+        assert_eq!(crate::version_request(&args(&["send", "file", "--version"])), None);
+    }
+
+    #[test]
+    fn version_flag_after_subcommand_is_a_usage_error() {
+        let home = TempDir::new().unwrap();
+        hayate(&home).args(["send", "-V"]).assert().failure().code(2);
+    }
+
+    #[test]
+    fn web_refuses_non_loopback_without_allow_lan() {
+        let home = TempDir::new().unwrap();
+        hayate(&home)
+            .args(["web", "--bind", "0.0.0.0", "--port", "0"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("--allow-lan"));
     }
 
     #[test]
@@ -157,6 +193,12 @@ mod tests {
 
         hayate(&home)
             .args(["history", "--clear"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("--yes"));
+
+        hayate(&home)
+            .args(["history", "--clear", "--yes"])
             .assert()
             .success()
             .stdout(predicate::str::contains("History cleared"));

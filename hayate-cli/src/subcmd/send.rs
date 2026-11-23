@@ -1,6 +1,6 @@
 //! `hayate send` subcommand.
 
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -47,9 +47,10 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         builder = builder.bandwidth_limit(rate);
     }
 
-    // Pairing code: explicit `--code`, or auto-generated when no target is given.
+    // Pairing code: explicit `--code`, or auto-generated when no target is
+    // given.
     let (phrase, print_instruction) = if let Some(code) = &args.code {
-        (Some(code.clone()), false)
+        (Some(crate::subcmd::normalize_code(code)?), false)
     } else if target_str.is_none() {
         let p = crate::words::generate_phrase();
         (Some(p), policy::get().normal())
@@ -58,11 +59,7 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     };
 
     if let Some(target_str) = &target_str {
-        let target_addr = target_str
-            .to_socket_addrs()
-            .context("invalid target address")?
-            .next()
-            .context("could not resolve target")?;
+        let target_addr = resolve_target(target_str)?;
         builder = builder.target(target_addr);
         // Optional out-of-band secret on a direct transfer.
         if let Some(code) = phrase {
@@ -144,7 +141,8 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
                         | TransferStage::WaitingForPeer
                         | TransferStage::Discovering { .. }
                         | TransferStage::Offer { .. } => {},
-                        // `TransferStage` is non_exhaustive for future engine stages.
+                        // `TransferStage` is non_exhaustive for future engine
+                        // stages.
                         _ => {},
                     }
                     Ok(())
@@ -180,12 +178,11 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         output::cipher_name(outcome.cipher_id),
     );
 
-    // Remember direct-transfer peers for `hayate send --to`.
-    if target_str.is_some()
-        && args.code.is_none()
-        && let Err(e) = peers::record(&outcome.peer.ip().to_string(), &outcome.peer.to_string())
-    {
-        output::warn(&format!("could not save peer: {e}"));
+    // Remember direct-transfer IPv4 peers for `hayate send --to`. IPv6 literals
+    // are not valid peer names, and a failed convenience write must never turn
+    // a completed transfer into a warning.
+    if target_str.is_some() && args.code.is_none() && outcome.peer.is_ipv4() {
+        let _ = peers::record(&outcome.peer.ip().to_string(), &outcome.peer.to_string());
     }
     history::record_transfer(
         "send",
@@ -206,11 +203,14 @@ async fn pick_peer(cancelled: &Arc<AtomicBool>) -> Result<String> {
     if !output::is_tty() {
         bail!("--pick requires an interactive terminal (no TTY detected)");
     }
-    let found =
-        crate::subcmd::discover::scan_for_peers(5, None, Arc::clone(cancelled), true, |_| {})
-            .await?;
+    let mut found = crate::subcmd::discover::fast_discover(std::time::Duration::from_secs(2)).await;
     if found.is_empty() {
-        bail!("no receivers found on the network");
+        found =
+            crate::subcmd::discover::scan_for_peers(5, None, Arc::clone(cancelled), true, |_| {})
+                .await?;
+    }
+    if found.is_empty() {
+        bail!("no receivers found on the network (is `hayate receive` running?)");
     }
     let options: Vec<String> = found.iter().map(|p| format!("{}  ({})", p.addr, p.name)).collect();
     let choice =
@@ -253,6 +253,23 @@ fn parse_rate(raw: &str) -> Result<u64> {
     Ok(rate as u64)
 }
 
+/// Resolves a target address, preferring IPv4.
+///
+/// A receiver bound to `0.0.0.0` is unreachable over IPv6, and `localhost`
+/// resolves to `::1` first on most systems, so taking the first resolver result
+/// fails even when the IPv4 loopback would work.
+fn resolve_target(raw: &str) -> Result<SocketAddr> {
+    let mut candidates: Vec<SocketAddr> = raw
+        .to_socket_addrs()
+        .with_context(|| format!("invalid target address \"{raw}\""))?
+        .collect();
+    if candidates.is_empty() {
+        bail!("could not resolve target \"{raw}\"");
+    }
+    candidates.sort_by_key(|addr| !addr.is_ipv4());
+    Ok(candidates[0])
+}
+
 /// Interactive path prompt for `hayate send` with no positional path.
 fn prompt_path() -> Result<PathBuf> {
     if !output::is_tty() {
@@ -278,7 +295,25 @@ fn prompt_path() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_rate;
+    use super::{parse_rate, resolve_target};
+
+    #[test]
+    fn resolve_target_prefers_ipv4_literal() {
+        let addr = resolve_target("127.0.0.1:50001").unwrap();
+        assert!(addr.is_ipv4());
+        assert_eq!(addr.port(), 50001);
+    }
+
+    #[test]
+    fn resolve_target_keeps_ipv6_literal() {
+        let addr = resolve_target("[::1]:50001").unwrap();
+        assert!(addr.is_ipv6());
+    }
+
+    #[test]
+    fn resolve_target_rejects_garbage() {
+        assert!(resolve_target("not an address").is_err());
+    }
 
     #[test]
     fn parse_rate_plain_bytes() {
