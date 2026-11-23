@@ -5,7 +5,7 @@
 //! accepts any cert (InsecureSkipVerify — the application layer key
 //! exchange provides the actual channel binding).
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 
 use compio_quic::{ClientConfig, Endpoint, ServerConfig};
@@ -48,8 +48,9 @@ pub fn build_transport_config() -> Arc<quinn_proto::TransportConfig> {
     // 2. Asymmetric Flow Control Windows
     #[cfg(target_os = "android")]
     {
-        // Android/Termux: Optimized flow control windows to prevent kernel buffer drops
-        // while allowing enough outstanding data to saturate Wi-Fi links.
+        // Android/Termux: Optimized flow control windows to prevent kernel
+        // buffer drops while allowing enough outstanding data to saturate Wi-Fi
+        // links.
         config.stream_receive_window(quinn_proto::VarInt::from_u32(4_194_304)); // 4 MB
         config.receive_window(quinn_proto::VarInt::from_u32(8_388_608)); // 8 MB
         config.send_window(8_388_608); // 8 MB
@@ -184,11 +185,39 @@ pub async fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
     Ok(endpoint)
 }
 
-/// Creates a QUIC client endpoint bound to an ephemeral local port.
+/// Creates a QUIC client endpoint bound to an ephemeral IPv4 local port.
+///
+/// Prefer [`bind_client_for`] when the remote address is known: an IPv4-only
+/// socket cannot reach an IPv6 peer.
 #[allow(clippy::unused_async)]
 pub async fn bind_client() -> Result<Endpoint, EngineError> {
+    bind_client_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).await
+}
+
+/// Creates a QUIC client endpoint whose local socket matches the address
+/// family of `remote`.
+///
+/// Binding `0.0.0.0:0` and dialing `[::1]:50001` fails with
+/// "invalid remote address" on every platform, so the local wildcard must
+/// follow the remote family.
+#[allow(clippy::unused_async)]
+pub async fn bind_client_for(remote: SocketAddr) -> Result<Endpoint, EngineError> {
     let cfg = client_config()?;
-    let bind_addr: SocketAddr = "0.0.0.0:0".parse().expect("static parse");
+    let bind_addr = if remote.is_ipv6() {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
+    } else {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+    };
+    let socket = client_socket(bind_addr)?;
+
+    let endpoint_config = quinn_proto::EndpointConfig::default();
+    let endpoint =
+        Endpoint::new(socket, endpoint_config, None, Some(cfg)).map_err(EngineError::Io)?;
+    Ok(endpoint)
+}
+
+/// Builds and binds the non-blocking UDP socket used by client endpoints.
+fn client_socket(bind_addr: SocketAddr) -> Result<compio::net::UdpSocket, EngineError> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(bind_addr),
         socket2::Type::DGRAM,
@@ -211,12 +240,7 @@ pub async fn bind_client() -> Result<Endpoint, EngineError> {
 
     socket.bind(&bind_addr.into()).map_err(EngineError::Io)?;
     let std_socket: std::net::UdpSocket = socket.into();
-    let compio_socket = compio::net::UdpSocket::from_std(std_socket).map_err(EngineError::Io)?;
-
-    let endpoint_config = quinn_proto::EndpointConfig::default();
-    let endpoint =
-        Endpoint::new(compio_socket, endpoint_config, None, Some(cfg)).map_err(EngineError::Io)?;
-    Ok(endpoint)
+    compio::net::UdpSocket::from_std(std_socket).map_err(EngineError::Io)
 }
 
 // ---------------------------------------------------------------------------
@@ -257,9 +281,9 @@ impl ServerCertVerifier for SkipCertVerification {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        // These are advertised to the peer during TLS negotiation, not verified.
-        // An empty list causes handshake failure, so the verifier still advertises
-        // the schemes the server may present.
+        // These are advertised to the peer during TLS negotiation, not
+        // verified. An empty list causes handshake failure, so the verifier
+        // still advertises the schemes the server may present.
         vec![SignatureScheme::ECDSA_NISTP256_SHA256, SignatureScheme::ED25519]
     }
 }

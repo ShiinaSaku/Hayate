@@ -23,6 +23,12 @@ use compio_quic::Endpoint;
 use crate::protocol::{Metadata, TransferKind};
 use crate::{EngineError, network, transfer};
 
+/// How long a direct QUIC connect may take before it is reported as a timeout.
+///
+/// QUIC's own idle timeout is five minutes, which is far too long for a CLI
+/// dialing a dead LAN address.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
 // ---------------------------------------------------------------------------
 // Stages and outcomes
 // ---------------------------------------------------------------------------
@@ -124,6 +130,8 @@ pub struct ReceiveOutcome {
     pub cipher_id: u8,
     /// Remote peer address.
     pub peer: SocketAddr,
+    /// True when at least one payload frame arrived zstd-compressed.
+    pub compressed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,10 +303,12 @@ impl HayateSender {
         // Establish the QUIC connection
         let (_endpoint, conn) = if let Some(target_addr) = self.target {
             on_stage(TransferStage::Connecting { peer: target_addr })?;
-            let endpoint = network::bind_client().await?;
+            let endpoint = network::bind_client_for(target_addr).await?;
             let client_cfg = network::client_config()?;
             let connecting = endpoint.connect(target_addr, "hayate.local", Some(client_cfg))?;
-            let conn = connecting.await?;
+            let conn = compio::time::timeout(CONNECT_TIMEOUT, connecting)
+                .await
+                .map_err(|_| EngineError::TimedOut(format!("connecting to {target_addr}")))??;
             (endpoint, conn)
         } else {
             let phrase = self.code.as_ref().ok_or_else(|| {
@@ -322,9 +332,7 @@ impl HayateSender {
 
             let incoming = compio::time::timeout(Duration::from_mins(1), endpoint.wait_incoming())
                 .await
-                .map_err(|_| {
-                    EngineError::Handshake("timed out waiting for receiver during pairing".into())
-                })?
+                .map_err(|_| EngineError::TimedOut("waiting for receiver during pairing".into()))?
                 .ok_or_else(|| EngineError::Handshake("Endpoint closed during pairing".into()))?;
             let conn = incoming.await?;
             (endpoint, conn)
@@ -754,17 +762,19 @@ impl HayateReceiver {
             };
 
             on_stage(TransferStage::Connecting { peer: peer_addr })?;
-            let endpoint = network::bind_client().await?;
+            let endpoint = network::bind_client_for(peer_addr).await?;
             let client_cfg = network::client_config()?;
             let connecting = endpoint.connect(peer_addr, "hayate.local", Some(client_cfg))?;
-            let conn = connecting.await?;
+            let conn = compio::time::timeout(CONNECT_TIMEOUT, connecting)
+                .await
+                .map_err(|_| EngineError::TimedOut(format!("connecting to {peer_addr}")))??;
             (endpoint, conn)
         } else {
             on_stage(TransferStage::WaitingForPeer)?;
             let endpoint = network::bind_server(self.bind_addr).await?;
             let incoming = compio::time::timeout(Duration::from_mins(1), endpoint.wait_incoming())
                 .await
-                .map_err(|_| EngineError::Handshake("timed out waiting for sender".into()))?
+                .map_err(|_| EngineError::TimedOut("waiting for sender".into()))?
                 .ok_or_else(|| EngineError::Handshake("Endpoint closed".into()))?;
             let conn = incoming.await?;
             (endpoint, conn)
@@ -925,7 +935,7 @@ async fn complete_receive_session(
         total_size: meta.total_size,
     })?;
 
-    let checksum = transfer::receive_payload_split(
+    let stats = transfer::receive_payload_split(
         &key,
         cipher_id,
         &mut recv_stream,
@@ -944,7 +954,14 @@ async fn complete_receive_session(
     compio::time::sleep(Duration::from_millis(50)).await;
     conn.close(0u32.into(), b"complete");
 
-    Ok(ReceiveOutcome { checksum, path: dest, meta, cipher_id, peer })
+    Ok(ReceiveOutcome {
+        checksum: stats.checksum,
+        path: dest,
+        meta,
+        cipher_id,
+        peer,
+        compressed: stats.compressed,
+    })
 }
 
 /// Chooses the resume offset for an accepted transfer.
@@ -1224,7 +1241,8 @@ mod tests {
         let recv = receiver_stages.lock().unwrap().clone();
         assert!(
             send.windows(2).all(|w| {
-                // Stages are emitted in a fixed order; allow only forward progress.
+                // Stages are emitted in a fixed order; allow only forward
+                // progress.
                 let order = [
                     "connecting",
                     "connected",
@@ -1276,8 +1294,9 @@ mod tests {
                     .send(&src_file, |_| Ok(()))
                     .await
                     .unwrap_err();
-                // Receiver closes after reject; sender may observe TransferRejected
-                // or a connection drop depending on scheduling.
+                // Receiver closes after reject; sender may observe
+                // TransferRejected or a connection drop depending on
+                // scheduling.
                 assert!(
                     matches!(
                         send_err,

@@ -23,12 +23,27 @@
 use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// mDNS service type for Hayate discovery.
 const MDNS_SERVICE_TYPE: &str = "_hayate._udp.local.";
 /// UDP discovery port.
 const UDP_DISCOVERY_PORT: u16 = 50002;
+
+/// UDP port used for active "who is here?" discovery queries.
+///
+/// Kept separate from [`UDP_DISCOVERY_PORT`] so a receiver can answer queries
+/// while a pairing session is listening for sender broadcasts on the other
+/// port.
+pub const DISCOVERY_QUERY_PORT: u16 = 50003;
+
+/// Query packet sent by `hayate discover`.
+const QUERY_MAGIC: &str = "HAYATE_DISCOVER:v1";
+
+/// Reply packet sent by an announcing receiver.
+const REPLY_MAGIC: &str = "HAYATE_HERE";
 
 /// Result of a discovery probe containing peer metadata.
 #[derive(Debug, Clone)]
@@ -42,6 +57,8 @@ pub struct DiscoveredPeer {
     pub os: String,
     /// Round-trip time of the probe in milliseconds.
     pub rtt_ms: Option<f64>,
+    /// Hayate version string reported by the peer, when known.
+    pub version: String,
 }
 
 /// Computes SHA-256 of the phrase and returns the first 4 bytes as a hex
@@ -125,8 +142,19 @@ pub fn start_broadcaster_hybrid(
     let instance_name = format!("hayate-{channel_id}");
     let host_name = format!("hayate-{channel_id}.local.");
 
-    let txt_props: &[(&str, &str)] =
-        &[("chid", channel_id), ("os", os_name), ("port", &port.to_string())];
+    let port_str = port.to_string();
+    let name = local_hostname();
+    let ip_str = crate::local_addr::primary_local_ipv4()
+        .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string());
+    let txt_props: &[(&str, &str)] = &[
+        ("chid", channel_id),
+        ("role", "sender"),
+        ("name", name.as_str()),
+        ("os", os_name),
+        ("port", port_str.as_str()),
+        ("ip", ip_str.as_str()),
+        ("version", env!("CARGO_PKG_VERSION")),
+    ];
 
     let ip_str = crate::local_addr::primary_local_ipv4()
         .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string());
@@ -189,6 +217,259 @@ async fn udp_broadcast_loop(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Receiver announcer + active discovery query
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Best-effort human-readable host name for discovery announcements.
+///
+/// `HAYATE_NAME` overrides everything; otherwise `HOSTNAME`, `COMPUTERNAME`,
+/// and `/etc/hostname` are consulted in that order.
+#[must_use]
+pub fn local_hostname() -> String {
+    let raw = std::env::var("HAYATE_NAME")
+        .ok()
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .or_else(|| {
+            // macOS has no /etc/hostname; the `hostname` utility exists on
+            // every supported platform and returns immediately.
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        })
+        .unwrap_or_default();
+    let cleaned: String =
+        raw.trim().chars().filter(|c| !matches!(c, ':' | '\n' | '\r' | '\t')).take(64).collect();
+    if cleaned.is_empty() { "Hayate Peer".to_owned() } else { cleaned }
+}
+
+/// Keeps a receiver visible to `hayate discover` while it listens.
+///
+/// Registers an mDNS `_hayate._udp.local.` service (with `role=receiver`) and
+/// answers UDP discovery queries on [`DISCOVERY_QUERY_PORT`]. Both channels are
+/// best-effort: a failure to advertise never prevents receiving, and dropping
+/// the guard tears both down.
+pub struct Announcer {
+    cancel: Arc<AtomicBool>,
+    mdns: Option<mdns_sd::ServiceDaemon>,
+    responder: Option<std::thread::JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for Announcer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Announcer")
+            .field("cancel", &self.cancel)
+            .field("mdns", &self.mdns.is_some())
+            .field("responder", &self.responder.is_some())
+            .finish()
+    }
+}
+
+impl Drop for Announcer {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        if let Some(mdns) = self.mdns.take() {
+            let _ = mdns.shutdown();
+        }
+        if let Some(handle) = self.responder.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Starts advertising a receiver that listens on `listen`.
+///
+/// The mDNS record advertises `listen`'s address when it is specific, or the
+/// primary LAN address when bound to a wildcard.
+///
+/// # Errors
+///
+/// Returns [`io::Error`] only when the announcement could not be started at
+/// all; the mDNS and UDP channels degrade independently and silently.
+pub fn start_announcer(listen: SocketAddr) -> Result<Announcer, io::Error> {
+    let name = local_hostname();
+    let os = std::env::consts::OS.to_owned();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let quic_port = listen.port();
+    let port_str = quic_port.to_string();
+    // Advertise an address the peer can actually reach: the bound address when
+    // it is specific, otherwise the primary LAN address.
+    let ip_str = if listen.ip().is_unspecified() {
+        crate::local_addr::primary_local_ipv4()
+            .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string())
+    } else {
+        listen.ip().to_string()
+    };
+    let instance = format!("hayate-{quic_port}");
+    let host_name = format!("hayate-{quic_port}.local.");
+    let txt_props: &[(&str, &str)] = &[
+        ("role", "receiver"),
+        ("name", name.as_str()),
+        ("os", os.as_str()),
+        ("port", port_str.as_str()),
+        ("ip", ip_str.as_str()),
+        ("version", env!("CARGO_PKG_VERSION")),
+    ];
+
+    let mdns = mdns_sd::ServiceDaemon::new().ok().and_then(|daemon| {
+        let service = mdns_sd::ServiceInfo::new(
+            MDNS_SERVICE_TYPE,
+            &instance,
+            &host_name,
+            ip_str.as_str(),
+            quic_port,
+            txt_props,
+        )
+        .ok()?;
+        daemon.register(service).ok()?;
+        Some(daemon)
+    });
+
+    let responder = {
+        let cancel = Arc::clone(&cancel);
+        let name = name.clone();
+        let os = os.clone();
+        let ip = ip_str.clone();
+        std::thread::spawn(move || responder_loop(&name, &os, &ip, quic_port, &cancel))
+    };
+
+    Ok(Announcer { cancel, mdns, responder: Some(responder) })
+}
+
+/// Answers `HAYATE_DISCOVER:v1` queries with a unicast `HAYATE_HERE` reply.
+fn responder_loop(name: &str, os: &str, ip: &str, quic_port: u16, cancel: &AtomicBool) {
+    let Ok(socket) = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_QUERY_PORT))
+    else {
+        return;
+    };
+    let _ = socket.set_read_timeout(Some(Duration::from_millis(300)));
+    // v2 carries the address the receiver is actually bound to, so a client
+    // that reached us by broadcast does not mistake our LAN source address for
+    // a reachable listener when we are bound to loopback.
+    let reply =
+        format!("{REPLY_MAGIC}:v2:{name}:{os}:{quic_port}:{ip}:{}", env!("CARGO_PKG_VERSION"));
+    let mut buf = [0u8; 512];
+
+    while !cancel.load(Ordering::Relaxed) {
+        match socket.recv_from(&mut buf) {
+            Ok((n, src)) => {
+                let is_query =
+                    std::str::from_utf8(&buf[..n]).is_ok_and(|text| text.trim() == QUERY_MAGIC);
+                if is_query {
+                    let _ = socket.send_to(reply.as_bytes(), src);
+                }
+            },
+            Err(ref e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+            },
+            Err(_) => break,
+        }
+    }
+}
+
+/// Actively asks every local network for Hayate receivers.
+///
+/// Broadcasts [`QUERY_MAGIC`] to the all-ones broadcast address of every local
+/// interface (plus loopback for same-machine peers) and collects
+/// [`REPLY_MAGIC`] replies until `timeout` elapses. This costs two packets
+/// instead of a full subnet sweep and works on networks that block mDNS.
+///
+/// Discovery is unauthenticated: treat replies as hints and let the pairing
+/// handshake authenticate the peer.
+///
+/// # Errors
+///
+/// Returns [`io::Error`] when the local UDP socket cannot be created.
+pub fn query(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    socket.set_broadcast(true)?;
+    socket.set_read_timeout(Some(Duration::from_millis(150)))?;
+
+    let mut targets = vec![
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_QUERY_PORT),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), DISCOVERY_QUERY_PORT),
+    ];
+    for net in crate::local_addr::local_networks() {
+        let target = SocketAddr::new(IpAddr::V4(net.broadcast()), DISCOVERY_QUERY_PORT);
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+
+    // Two rounds: UDP is lossy, and the first packet may wake a radio.
+    for _ in 0..2 {
+        for target in &targets {
+            let _ = socket.send_to(QUERY_MAGIC.as_bytes(), target);
+        }
+    }
+
+    let deadline = Instant::now() + timeout;
+    let mut buf = [0u8; 1024];
+    let mut seen = HashSet::new();
+    let mut peers = Vec::new();
+
+    while Instant::now() < deadline {
+        match socket.recv_from(&mut buf) {
+            Ok((n, src)) => {
+                if let Ok(text) = std::str::from_utf8(&buf[..n])
+                    && let Some(peer) = parse_reply(text, src)
+                    && seen.insert(peer.addr)
+                {
+                    peers.push(peer);
+                }
+            },
+            Err(ref e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+            },
+            Err(_) => break,
+        }
+    }
+
+    Ok(peers)
+}
+
+/// Parses `HAYATE_HERE:v2:<name>:<os>:<port>:<ip>:<version>` into a peer.
+///
+/// v1 replies (no `ip` field) are still accepted and fall back to the packet's
+/// source address.
+fn parse_reply(text: &str, src: SocketAddr) -> Option<DiscoveredPeer> {
+    let mut parts = text.trim().splitn(7, ':');
+    if parts.next()? != "HAYATE_HERE" {
+        return None;
+    }
+    let tag = parts.next()?;
+    let name = parts.next()?.to_owned();
+    let os = parts.next()?.to_owned();
+    let port: u16 = parts.next()?.parse().ok()?;
+    let (ip, version) = match tag {
+        "v2" => {
+            let ip: Ipv4Addr = parts.next()?.parse().ok()?;
+            let version = parts.next().unwrap_or("unknown").to_owned();
+            (ip, version)
+        },
+        "v1" => {
+            let ip = match src.ip() {
+                IpAddr::V4(ip) => ip,
+                IpAddr::V6(_) => return None,
+            };
+            (ip, parts.next().unwrap_or("unknown").to_owned())
+        },
+        _ => return None,
+    };
+    Some(DiscoveredPeer {
+        name,
+        addr: SocketAddr::new(IpAddr::V4(ip), port),
+        os,
+        rtt_ms: None,
+        version,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Listener / browser (receiver side)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -231,7 +512,14 @@ pub fn listen_for_broadcast(
                 break;
             }
             if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-                for addr in info.get_addresses_v4() {
+                let advertised_ip = info
+                    .get_property_val_str("ip")
+                    .and_then(|value| value.parse::<Ipv4Addr>().ok());
+                let addresses: Vec<Ipv4Addr> = match advertised_ip {
+                    Some(ip) => vec![ip],
+                    None => info.get_addresses_v4().into_iter().collect(),
+                };
+                for addr in addresses {
                     let remote_chid =
                         info.get_property_val_str("chid").unwrap_or_default().to_owned();
                     let remote_os = info.get_property_val_str("os").unwrap_or("unknown").to_owned();
@@ -349,13 +637,29 @@ pub fn scan(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
             if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                 let remote_chid = info.get_property_val_str("chid").unwrap_or_default().to_owned();
                 let remote_os = info.get_property_val_str("os").unwrap_or("unknown").to_owned();
+                let remote_name = info.get_property_val_str("name").unwrap_or_default().to_owned();
+                let remote_version =
+                    info.get_property_val_str("version").unwrap_or("unknown").to_owned();
                 let remote_port = info.get_port();
-                for addr in info.get_addresses_v4() {
+                let display = if remote_name.is_empty() {
+                    format!("mDNS:{remote_chid}")
+                } else {
+                    remote_name
+                };
+                let advertised_ip = info
+                    .get_property_val_str("ip")
+                    .and_then(|value| value.parse::<Ipv4Addr>().ok());
+                let addresses: Vec<Ipv4Addr> = match advertised_ip {
+                    Some(ip) => vec![ip],
+                    None => info.get_addresses_v4().into_iter().collect(),
+                };
+                for addr in addresses {
                     let _ = found_tx_mdns.send(DiscoveredPeer {
-                        name: format!("mDNS:{remote_chid}"),
+                        name: display.clone(),
                         addr: SocketAddr::new(IpAddr::V4(addr), remote_port),
                         os: remote_os.clone(),
                         rtt_ms: None,
+                        version: remote_version.clone(),
                     });
                 }
             }
@@ -392,7 +696,13 @@ pub fn scan(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
                         && let Some(result) = parse_udp_packet(text, None, src_addr)
                     {
                         let (name, addr, os) = result;
-                        let _ = found_tx_udp.send(DiscoveredPeer { name, addr, os, rtt_ms: None });
+                        let _ = found_tx_udp.send(DiscoveredPeer {
+                            name,
+                            addr,
+                            os,
+                            rtt_ms: None,
+                            version: "unknown".to_owned(),
+                        });
                     }
                 },
                 Err(ref e)
@@ -458,10 +768,11 @@ fn parse_udp_packet(
 mod tests {
     use super::derive_channel_id;
 
-    // ── derive_channel_id ─────────────────────────────────────────────────────
+    // ── derive_channel_id
+    // ─────────────────────────────────────────────────────
     //
-    // derive_channel_id is the public integration point for hex_encode (change 1):
-    // it takes the first 4 bytes of a SHA-256 digest and hex-encodes them.
+    // derive_channel_id is the public integration point for hex_encode (change
+    // 1): it takes the first 4 bytes of a SHA-256 digest and hex-encodes them.
     //
     // The 4-byte slice means we're encoding bytes in the range 0x00-0xff.
     // A leading-zero regression (0x0a → "a") would shorten the output from
@@ -474,7 +785,8 @@ mod tests {
     /// A 7-character output would indicate a dropped leading zero.
     #[test]
     fn derive_channel_id_is_exactly_8_lowercase_hex_chars() {
-        // Use many phrases to maximise the chance of hitting a sub-0x10 first byte.
+        // Use many phrases to maximise the chance of hitting a sub-0x10 first
+        // byte.
         for phrase in ["", "a", "abc", "apple-bravo-charlie", "x".repeat(200).as_str()] {
             let id = derive_channel_id(phrase);
             assert_eq!(id.len(), 8, "derive_channel_id({phrase:?}) must be 8 chars, got {id:?}");
@@ -509,5 +821,32 @@ mod tests {
     #[test]
     fn derive_channel_id_known_vector_empty_phrase() {
         assert_eq!(derive_channel_id(""), "e3b0c442");
+    }
+
+    #[test]
+    fn parse_reply_reads_port_and_version() {
+        let src: std::net::SocketAddr = "192.168.1.9:41234".parse().unwrap();
+        let peer = super::parse_reply("HAYATE_HERE:v1:studio-mac:macos:50001:6.1.0", src)
+            .expect("valid reply");
+        assert_eq!(peer.name, "studio-mac");
+        assert_eq!(peer.os, "macos");
+        assert_eq!(peer.version, "6.1.0");
+        assert_eq!(peer.addr, "192.168.1.9:50001".parse().unwrap());
+    }
+
+    #[test]
+    fn parse_reply_v2_prefers_the_advertised_address() {
+        let src: std::net::SocketAddr = "192.168.1.9:41234".parse().unwrap();
+        let peer = super::parse_reply("HAYATE_HERE:v2:studio-mac:macos:50001:127.0.0.1:6.1.0", src)
+            .expect("valid v2 reply");
+        assert_eq!(peer.addr, "127.0.0.1:50001".parse().unwrap());
+        assert_eq!(peer.version, "6.1.0");
+    }
+
+    #[test]
+    fn parse_reply_rejects_other_packets() {
+        let src: std::net::SocketAddr = "192.168.1.9:41234".parse().unwrap();
+        assert!(super::parse_reply("HAYATE_PEER:v2:abcd:linux:50001", src).is_none());
+        assert!(super::parse_reply("HAYATE_HERE:v1:only-a-name", src).is_none());
     }
 }

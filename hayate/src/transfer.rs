@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use compio::buf::{IntoInner, IoBuf};
 use compio::io::{AsyncReadAt, AsyncReadExt, AsyncWriteAtExt, AsyncWriteExt};
@@ -31,6 +33,21 @@ use crate::{EngineError, crypto};
 /// Oldest wire protocol version a receiver will still accept. v6 lacks the
 /// resume offset; the receiver adapts by never writing one to a v6 peer.
 const MIN_SUPPORTED_VERSION: u16 = 6;
+
+/// How long the receiver waits for the next payload frame before giving up.
+///
+/// QUIC keep-alives keep the connection alive even when the peer stops
+/// sending, so without this a stalled sender hangs the receive forever.
+const FRAME_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Result of a completed payload receive.
+#[derive(Debug, Clone)]
+pub struct ReceiveStats {
+    /// End-to-end payload checksum (`algo$hex`).
+    pub checksum: String,
+    /// True when at least one frame arrived zstd-compressed.
+    pub compressed: bool,
+}
 
 // ---------------------------------------------------------------------------
 // Non-blocking Payload Sources and Sinks
@@ -746,7 +763,7 @@ pub async fn receive_payload<S>(
     hash_algo: &str,
     resume_offset: u64,
     mut progress_cb: impl FnMut(u64) -> Result<(), EngineError> + 'static,
-) -> Result<String, EngineError>
+) -> Result<ReceiveStats, EngineError>
 where
     S: compio::io::AsyncRead + Unpin,
 {
@@ -764,6 +781,7 @@ where
     let plain_pool = crate::pool::BufferPool::new(32, CHUNK_SIZE);
 
     let (tx, rx) = flume::bounded::<Vec<u8>>(8);
+    let compressed = Arc::new(AtomicBool::new(false));
 
     let extract_handle = if transfer_type == TransferKind::Directory {
         let out = output_path.to_path_buf();
@@ -854,6 +872,7 @@ where
         let key = *key;
         let pool_clone = pool.clone();
         let plain_pool_clone = plain_pool.clone();
+        let compressed = Arc::clone(&compressed);
         std::thread::spawn(move || {
             let aead_key = match crypto::AeadKey::new(&key, cipher_id) {
                 Ok(key) => key,
@@ -911,6 +930,7 @@ where
                                 // CHUNK_SIZE — the sender only ever compresses
                                 // chunks up to that size — so the pool's
                                 // fixed-size buffer is always big enough.
+                                compressed.store(true, Ordering::Relaxed);
                                 let mut plain = plain_pool_clone.lease_sync();
                                 match decompressor.decompress_to_buffer(data, &mut plain) {
                                     Ok(_) => Ok(plain),
@@ -1042,9 +1062,10 @@ where
                 )));
             }
         } else {
-            // Directory transfer. The metadata size is an estimate of file contents,
-            // not the tar stream size; allow tar header/padding overhead but
-            // cap the total to prevent a runaway peer from filling the disk.
+            // Directory transfer. The metadata size is an estimate of file
+            // contents, not the tar stream size; allow tar header/padding
+            // overhead but cap the total to prevent a runaway peer from filling
+            // the disk.
             let max_dir_size = expected_size.saturating_mul(4).saturating_add(64 * 1024 * 1024);
             if total > max_dir_size {
                 return Err(EngineError::Io(io::Error::new(
@@ -1078,7 +1099,15 @@ where
     let mut current_index = 0;
     let mut len_buf_owned = vec![0u8; 4];
     loop {
-        let compio::BufResult(result, len_buf) = stream.read_exact(len_buf_owned).await;
+        let Ok(compio::BufResult(result, len_buf)) =
+            compio::time::timeout(FRAME_STALL_TIMEOUT, stream.read_exact(len_buf_owned)).await
+        else {
+            read_error = Some(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "no payload data received before the stall timeout",
+            ));
+            break;
+        };
         len_buf_owned = len_buf;
         match result {
             Ok(()) => {},
@@ -1095,7 +1124,8 @@ where
             len_buf_owned[3],
         ]) as usize;
 
-        // Max frame = flag (1) + encrypted chunk (CHUNK_SIZE + zstd worst case + nonce
+        // Max frame = flag (1) + encrypted chunk (CHUNK_SIZE + zstd worst case
+        // + nonce
         // + tag). Use a precise cap instead of an arbitrary 64 MiB constant to
         // prevent a malformed peer from forcing a large allocation before AEAD
         // authentication runs.
@@ -1115,8 +1145,18 @@ where
 
         let mut enc_owned = pool.lease().await;
         enc_owned.resize(frame_len, 0);
-        let compio::BufResult(result, enc_sliced) =
-            stream.read_exact(enc_owned.slice(0..frame_len)).await;
+        let Ok(compio::BufResult(result, enc_sliced)) = compio::time::timeout(
+            FRAME_STALL_TIMEOUT,
+            stream.read_exact(enc_owned.slice(0..frame_len)),
+        )
+        .await
+        else {
+            read_error = Some(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "payload frame body stalled past the timeout",
+            ));
+            break;
+        };
         let enc = enc_sliced.into_inner();
         match result {
             Ok(()) => {
@@ -1145,7 +1185,7 @@ where
     if let Some(mut guard) = cleanup_guard {
         guard.disable();
     }
-    Ok(hash)
+    Ok(ReceiveStats { checksum: hash, compressed: compressed.load(Ordering::Relaxed) })
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,7 +1239,7 @@ pub async fn receive_payload_split(
     hash_algo: &str,
     resume_offset: u64,
     progress_cb: impl FnMut(u64) -> Result<(), EngineError> + 'static,
-) -> Result<String, EngineError> {
+) -> Result<ReceiveStats, EngineError> {
     receive_payload(
         key,
         cipher_id,
@@ -1292,7 +1332,8 @@ mod tests {
         });
     }
 
-    // ── PayloadHasher ─────────────────────────────────────────────────────────
+    // ── PayloadHasher
+    // ─────────────────────────────────────────────────────────
     //
     // These tests validate change 1 (hex_encode) through the SHA-256 arm of
     // PayloadHasher, which is the only public-surface user of hex_encode that
