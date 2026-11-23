@@ -284,11 +284,11 @@ pub fn info(msg: &str) {
     if crate::policy::get().is_json() {
         return;
     }
-    let text = format!("   {}  {}", style(icon_info()).bold().blue(), style(msg).white());
     if is_tty() {
+        let text = format!("   {}  {}", style(icon_info()).bold().blue(), style(msg).white());
         let _ = multi().println(text);
     } else {
-        println!("{text}");
+        println!("{msg}");
     }
 }
 
@@ -297,11 +297,11 @@ pub fn ok(msg: &str) {
     if crate::policy::get().is_json() {
         return;
     }
-    let text = format!("   {}  {}", style(icon_ok()).bold().green(), msg);
     if is_tty() {
+        let text = format!("   {}  {}", style(icon_ok()).bold().green(), msg);
         let _ = multi().println(text);
     } else {
-        println!("{text}");
+        println!("{msg}");
     }
 }
 
@@ -310,11 +310,11 @@ pub fn warn(msg: &str) {
     if crate::policy::get().is_json() {
         return;
     }
-    let text = format!("   {}  {}", style(icon_warn()).bold().yellow(), style(msg).yellow());
     if is_tty() {
+        let text = format!("   {}  {}", style(icon_warn()).bold().yellow(), style(msg).yellow());
         let _ = multi().println(text);
     } else {
-        println!("{text}");
+        eprintln!("warning: {msg}");
     }
 }
 
@@ -323,11 +323,11 @@ pub fn err(msg: &str) {
     if crate::policy::get().is_json() {
         return;
     }
-    let text = format!("   {}  {}", style(icon_err()).bold().red(), style(msg).red());
     if is_tty() {
+        let text = format!("   {}  {}", style(icon_err()).bold().red(), style(msg).red());
         let _ = multi().println(text);
     } else {
-        eprintln!("{text}");
+        eprintln!("error: {msg}");
     }
 }
 
@@ -336,26 +336,27 @@ pub fn print_error(err: &anyhow::Error) {
     if crate::policy::get().is_json() {
         return;
     }
-    let mut lines = Vec::new();
+
     let mut chain = err.chain();
-    let branch = if unicode_capable() { "└─" } else { "`-" };
-    if let Some(top_err) = chain.next() {
-        lines.push(format!(
+    let top = chain.next().map(ToString::to_string).unwrap_or_default();
+    let causes: Vec<String> = chain.map(ToString::to_string).collect();
+    let verbose = crate::policy::get().verbose > 0;
+
+    if is_tty() {
+        let _ = multi().println(format!(
             "   {}  {}",
             style(icon_err()).bold().red(),
-            style(top_err.to_string()).bold().red()
+            style(&top).bold().red()
         ));
-    }
-    for cause in chain {
-        lines.push(format!("      {} {}", style(branch).dim(), style(cause.to_string()).dim()));
-    }
-    if is_tty() {
-        for line in lines {
-            let _ = multi().println(line);
+        let branch = if unicode_capable() { "└─" } else { "`-" };
+        for cause in causes.iter().take(if verbose { usize::MAX } else { 1 }) {
+            let _ =
+                multi().println(format!("      {} {}", style(branch).dim(), style(cause).dim()));
         }
     } else {
-        for line in lines {
-            eprintln!("{line}");
+        eprintln!("error: {top}");
+        for cause in causes.iter().take(if verbose { usize::MAX } else { 1 }) {
+            eprintln!("  caused by: {cause}");
         }
     }
 }
@@ -366,16 +367,16 @@ pub fn stage(name: &str, detail: impl std::fmt::Display) {
     if crate::policy::get().is_json() {
         return;
     }
-    let text = format!(
-        "   {}  {:<11} {}",
-        style(icon_arrow()).bold().cyan(),
-        style(name).bold(),
-        style(detail).white()
-    );
     if is_tty() {
+        let text = format!(
+            "   {}  {:<11} {}",
+            style(icon_arrow()).bold().cyan(),
+            style(name).bold(),
+            style(detail).white()
+        );
         let _ = multi().println(text);
     } else {
-        println!("{text}");
+        println!("{name}: {detail}");
     }
 }
 
@@ -400,35 +401,30 @@ pub fn key_value(key: &str, value: impl std::fmt::Display) {
 
 pub fn print_banner() {
     let width = terminal_width();
+    let unicode = unicode_capable();
+    let mark = if unicode { "»»»" } else { ">>>" };
+    let rule = if unicode { "─" } else { "-" };
 
-    if unicode_capable() && width >= 45 {
-        let logo = r#"
-    __  _______  _____  ____________
-   / / / /   \ \/ /   |/_  __/ ____/
-  / /_/ / /| |\  / /| | / / / __/
- / __  / ___ |/ / ___ |/ / / /___
-/_/ /_/_/  |_/_/_/  |_/_/ /_____/
-"#;
-        println!("{}", style(logo).bold().cyan());
+    println!();
+    if width >= 54 {
+        println!(
+            "   {}  {}  {}",
+            style(mark).bold().green(),
+            style("hayate").bold().white(),
+            style(format!("v{VERSION}")).dim()
+        );
+        println!("        {}", style("encrypted LAN transfer over QUIC").dim());
+        let bar_w = width.saturating_sub(8).clamp(32, 64);
+        println!("   {}", style(rule.repeat(bar_w)).dim());
     } else {
-        let logo = r#"
-  H A Y A T E
-  encrypted LAN transfer
-"#;
-        println!("{}", style(logo).bold().cyan());
+        println!(
+            "   {}  {}  {}",
+            style(mark).bold().green(),
+            style("hayate").bold().white(),
+            style(format!("v{VERSION}")).dim()
+        );
+        println!("        {}", style("encrypted LAN transfer").dim());
     }
-
-    let separator = if unicode_capable() { "━" } else { "=" };
-    let bar_w = width.saturating_sub(6).clamp(32, 72);
-    println!(
-        "   {} {} {} {} {}",
-        style("Hayate").bold().green(),
-        style(box_v()).dim(),
-        style("encrypted LAN transfer").white(),
-        style(box_v()).dim(),
-        style(format!("v{VERSION}")).cyan().bold()
-    );
-    println!("   {}", style(separator.repeat(bar_w)).dim());
     println!();
 }
 
