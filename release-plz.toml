@@ -1,0 +1,8 @@
+# release-plz owns version bumps, CHANGELOG.md, crates.io publishing, and the
+# git tag. cargo-dist owns everything after the tag: GitHub Releases, archives,
+# installers, and attestations.
+[workspace]
+changelog_update = true
+# cargo-dist creates the GitHub Release from the tag, so release-plz must not.
+git_release_enable = false
+git_tag_enable = true

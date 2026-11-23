@@ -78,6 +78,27 @@ jobs:
         with:
           package: hayate
 
+  web:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.5
+      - name: Install dashboard dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Type-check
+        working-directory: web
+        run: bun run check
+      - name: Build
+        working-directory: web
+        run: bun run build
+      # The Rust build embeds web/build, so a stale bundle must fail CI.
+      - name: Ensure the embedded bundle is committed
+        run: git diff --exit-code -- web/build
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

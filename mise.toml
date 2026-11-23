@@ -1,0 +1,49 @@
+[tools]
+bun = "1.4.5"
+
+# Rust comes from rust-toolchain.toml (stable + MSRV 1.96); nightly is only
+# needed for `cargo +nightly fmt` because rustfmt.toml uses unstable options.
+
+[tasks.fmt]
+description = "Format the workspace (nightly rustfmt)"
+run = "cargo +nightly fmt"
+
+[tasks.fmt-check]
+description = "Check formatting without writing"
+run = "cargo +nightly fmt -- --check"
+
+[tasks.clippy]
+description = "Clippy with warnings denied"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run the workspace test suite"
+run = "cargo test --workspace --all-targets"
+
+[tasks.web]
+description = "Build the SvelteKit dashboard into web/build (committed)"
+run = "cd web && bun install --frozen-lockfile && bun run build"
+
+[tasks.web-check]
+description = "Type-check the dashboard"
+run = "cd web && bun install --frozen-lockfile && bun run check"
+
+[tasks.web-dev]
+description = "Run the dashboard with hot reload (Vite dev server)"
+run = "cd web && bun run dev"
+
+[tasks.check]
+description = "Everything CI runs: fmt, clippy, tests, dashboard types"
+depends = ["fmt-check", "clippy", "test", "web-check"]
+
+[tasks.build]
+description = "Build the release binary for this host"
+run = "cargo build --release -p hayate-cli"
+
+[tasks.android]
+description = "Build the Termux (aarch64-linux-android) binary"
+run = "rustup target add aarch64-linux-android && cargo build --target aarch64-linux-android --release -p hayate-cli"
+
+[tasks.release]
+description = "Pre-release sanity check (release-plz opens the version PR in CI)"
+run = "mise run check"

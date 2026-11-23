@@ -20,3 +20,13 @@ updates:
       cargo:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+
+  - package-ecosystem: "bun"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies"]
+    groups:
+      dashboard:
+        patterns: ["*"]
