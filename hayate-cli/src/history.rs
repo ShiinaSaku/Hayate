@@ -102,9 +102,34 @@ fn read_all() -> Result<Vec<HistoryEntry>> {
     Ok(text.lines().filter_map(|line| serde_json::from_str(line).ok()).collect())
 }
 
+/// Returns the most recent entries, newest first, capped at `limit`.
+///
+/// `limit == 0` returns everything. Unreadable logs yield an empty list so
+/// callers such as the dashboard can stay up.
+pub fn recent(limit: usize) -> Result<Vec<HistoryEntry>> {
+    let mut entries = read_all()?;
+    entries.reverse();
+    if limit > 0 {
+        entries.truncate(limit);
+    }
+    Ok(entries)
+}
+
 /// `hayate history` subcommand entry point.
 pub fn run(args: HistoryArgs) -> Result<()> {
     if args.clear {
+        if !args.yes {
+            if !output::is_tty() {
+                anyhow::bail!("refusing to clear history without --yes (no TTY to confirm)");
+            }
+            let confirmed = output::suspend_for_prompt(|| {
+                inquire::Confirm::new("Delete the transfer history?").with_default(false).prompt()
+            })?;
+            if !confirmed {
+                output::info("History unchanged.");
+                return Ok(());
+            }
+        }
         let path = log_path()?;
         if path.exists() {
             std::fs::remove_file(&path)?;

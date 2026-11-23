@@ -1,0 +1,20 @@
+<script lang="ts">
+	let { class: className = 'size-6' }: { class?: string } = $props();
+</script>
+
+<svg
+	viewBox="0 0 120 120"
+	class={className}
+	fill="none"
+	stroke="currentColor"
+	stroke-linecap="round"
+	stroke-linejoin="round"
+	aria-hidden="true"
+>
+	<line x1="6" y1="60" x2="22" y2="60" stroke-width="6" stroke-opacity="0.35" />
+	<line x1="10" y1="42" x2="20" y2="42" stroke-width="5" stroke-opacity="0.18" />
+	<line x1="10" y1="78" x2="20" y2="78" stroke-width="5" stroke-opacity="0.18" />
+	<path d="M 30 24 L 66 60 L 30 96" stroke-width="8" stroke-opacity="0.25" />
+	<path d="M 54 24 L 90 60 L 54 96" stroke-width="8" stroke-opacity="0.55" />
+	<path d="M 78 24 L 114 60 L 78 96" stroke-width="8" />
+</svg>

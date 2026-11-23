@@ -9,6 +9,7 @@ mod peers;
 mod policy;
 mod subcmd;
 mod ui;
+mod web;
 mod words;
 
 use std::process::{ExitCode, Termination};
@@ -52,6 +53,30 @@ fn apply_color_override(args: &[String]) {
     }
 }
 
+/// Detects a top-level `-V` / `--version` request before clap runs.
+///
+/// Returns `Some(true)` for the short form and `Some(false)` for the long
+/// form. Only flags that appear **before any subcommand** count: scanning every
+/// argv element made `hayate send -V` print a version and exit 0 instead of
+/// reporting a usage error.
+fn version_request(args: &[String]) -> Option<bool> {
+    let mut skip_value = false;
+    for arg in args.iter().skip(1) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        match arg.as_str() {
+            "-V" => return Some(true),
+            "--version" => return Some(false),
+            "--color" | "--format" => skip_value = true,
+            other if other.starts_with('-') => {},
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn main() -> impl Termination {
     match run() {
         Ok(exit_code) => exit_code,
@@ -63,15 +88,22 @@ fn main() -> impl Termination {
 }
 
 fn run() -> Result<ExitCode> {
+    // Standard CLI behaviour: exit quietly when the reader closes the pipe
+    // (`hayate docs | head`), instead of panicking on a broken stdout.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let args: Vec<String> = std::env::args().collect();
     apply_color_override(&args);
 
-    if args.iter().any(|arg| arg == "-V") {
-        println!("v{}", env!("CARGO_PKG_VERSION"));
-        return Ok(ExitCode::SUCCESS);
-    }
-    if args.iter().any(|arg| arg == "--version") {
-        println!("v{} (commit: {})", env!("CARGO_PKG_VERSION"), env!("GIT_COMMIT_HASH"));
+    if let Some(short) = version_request(&args) {
+        if short {
+            println!("v{}", env!("CARGO_PKG_VERSION"));
+        } else {
+            println!("v{} (commit: {})", env!("CARGO_PKG_VERSION"), env!("GIT_COMMIT_HASH"));
+        }
         return Ok(ExitCode::SUCCESS);
     }
 

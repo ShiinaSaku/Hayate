@@ -32,20 +32,15 @@ pub fn run(args: DocsArgs) -> Result<()> {
         "completions" | "complete" => section_completions(),
         "peers" | "peer" => section_peers(),
         "history" | "log" => section_history(),
+        "web" | "dashboard" | "ui" => section_web(),
+        "site" | "online" => section_online(),
         "exit" | "codes" | "status" => section_exit_codes(),
         "env" | "environment" => section_environment(),
         "security" => section_security(),
-        "web" | "site" => {
-            heading("Online");
-            body(&format!("Website:  {DOCS_URL}"));
-            body(&format!("API docs: {API_DOCS_URL}"));
-            body("Open in browser:  hayate docs --web");
-            println!();
-        },
         other => {
             bail!(
                 "unknown docs topic `{other}`\n\
-                 try: all, start, send, receive, discover, peers, history, completions, exit, env, security, web"
+                 try: all, start, send, receive, discover, web, peers, history, completions, exit, env, security, site"
             );
         },
     }
@@ -60,6 +55,7 @@ fn print_all() {
     section_send();
     section_receive();
     section_discover();
+    section_web();
     section_peers();
     section_history();
     section_completions();
@@ -139,11 +135,30 @@ fn section_receive() {
 
 fn section_discover() {
     heading("hayate discover");
-    body("Probe local subnets for active receivers (unauthenticated hints).");
+    body("Find receivers on the local network. Uses mDNS and a UDP broadcast");
+    body("query first (instant, no scanning); falls back to a QUIC subnet sweep.");
+    body("Results are unauthenticated hints — the pairing handshake is the proof.");
     kv("-t / --timeout", "seconds (default 15)");
-    kv("--cidr", "e.g. 192.168.1.0/24");
+    kv("--scan", "also sweep every host (finds receivers that do not advertise)");
+    kv("--cidr", "sweep an explicit network, e.g. 192.168.1.0/24 or 10.0.0.0/16");
     println!();
-    code("hayate discover --timeout 5");
+    code("hayate discover");
+    code("hayate discover --scan --timeout 5");
+    code("hayate discover --cidr 10.0.0.0/16");
+    println!();
+}
+
+fn section_web() {
+    heading("hayate web");
+    body("Loopback dashboard: drag-and-drop send, receive listener, live progress.");
+    body("Peers, device info, and transfer history update over SSE.");
+    body("The startup URL carries a per-launch token — treat it like a password.");
+    kv("--bind", "interface to bind (default 127.0.0.1)");
+    kv("--port", "dashboard port (default 8787)");
+    kv("--allow-lan", "expose beyond this machine (not recommended)");
+    println!();
+    code("hayate web");
+    code("hayate web --port 9000");
     println!();
 }
 
@@ -278,7 +293,8 @@ fn open_url(url: &str) -> Result<()> {
     let status = if cfg!(target_os = "macos") {
         Command::new("open").arg(url).status()
     } else if cfg!(target_os = "windows") {
-        // `start` is a shell builtin; empty title avoids issues with quoted URLs.
+        // `start` is a shell builtin; empty title avoids issues with quoted
+        // URLs.
         Command::new("cmd").args(["/C", "start", "", url]).status()
     } else {
         // Linux / Android Termux: try xdg-open, then sensible-browser.

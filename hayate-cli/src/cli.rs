@@ -128,13 +128,23 @@ pub enum Command {
     )]
     Send(SendArgs),
 
-    /// Scan the local network for active Hayate receivers.
+    /// Discover receivers on the local network.
     #[command(
         alias = "scan",
-        long_about = "Probe local subnets for Hayate receivers via short QUIC checks.\n\
-                      Discovery is unauthenticated; use pairing or trust the LAN."
+        long_about = "Find receivers via mDNS and a UDP broadcast query, with an optional\n\
+                      QUIC subnet sweep (--scan / --cidr). Discovery is unauthenticated;\n\
+                      use pairing or trust the LAN."
     )]
     Discover(DiscoverArgs),
+
+    /// Open the local dashboard in the browser.
+    #[command(
+        alias = "dashboard",
+        long_about = "Serve a loopback-only dashboard: drag-and-drop send, a receive listener,\n\
+                      live progress, discovered peers, and transfer history. The URL printed\n\
+                      at startup contains a one-time access token."
+    )]
+    Web(WebArgs),
 
     /// Generate shell completion scripts.
     #[command(
@@ -205,6 +215,14 @@ pub struct ReceiveArgs {
     #[arg(long)]
     pub resume: bool,
 
+    /// Overwrite existing destination files without asking.
+    #[arg(long, conflicts_with = "no_overwrite")]
+    pub overwrite: bool,
+
+    /// Refuse transfers whose destination already exists.
+    #[arg(long)]
+    pub no_overwrite: bool,
+
     /// Exit after the first completed transfer (useful for scripting).
     #[arg(long)]
     pub once: bool,
@@ -264,9 +282,29 @@ pub struct DiscoverArgs {
     #[arg(short, long, default_value_t = 15)]
     pub timeout: u64,
 
-    /// Override the subnet CIDR to scan (e.g. 192.168.1.0/24).
+    /// Override the subnet CIDR to scan (e.g. 192.168.1.0/24, 10.0.0.0/16).
     #[arg(long)]
     pub cidr: Option<String>,
+
+    /// Also sweep every host in the local subnets (slower; finds receivers
+    /// that do not advertise).
+    #[arg(long)]
+    pub scan: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct WebArgs {
+    /// Interface to bind the dashboard to.
+    #[arg(long, default_value = "127.0.0.1")]
+    pub bind: IpAddr,
+
+    /// Port for the dashboard.
+    #[arg(long, default_value_t = 8787)]
+    pub port: u16,
+
+    /// Expose the dashboard beyond this machine (not recommended).
+    #[arg(long)]
+    pub allow_lan: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -304,6 +342,10 @@ pub struct HistoryArgs {
     /// Delete the history log.
     #[arg(long)]
     pub clear: bool,
+
+    /// Skip the confirmation prompt for --clear.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(clap::Args, Debug)]
