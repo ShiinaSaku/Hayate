@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./assets/logo.svg" alt="Hayate" width="128" height="128" />
+<img src="./assets/logo.svg" alt="Hayate" width="120" height="120" />
 
 # Hayate
 
-**Encrypted, compressed LAN file transfer. One binary, one command — no cloud, no accounts, no SSH.**
+**Encrypted, compressed LAN file transfer — one binary, no cloud, no accounts, no SSH.**
 
-QUIC transport · X25519 + AEAD · 4-word pairing phrases · macOS / Linux / Windows / Android
+QUIC transport · X25519 + AEAD · 4-word pairing phrases · local web dashboard
 
 [![Website](https://img.shields.io/badge/website-hayate.shiina.xyz-6ea8fe?style=flat-square)](https://hayate.shiina.xyz)
 [![CI](https://img.shields.io/github/actions/workflow/status/ShiinaSaku/Hayate/ci.yml?style=flat-square&label=CI)](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml)
@@ -29,93 +29,130 @@ $ hayate send ./photos.zip
    Receiver runs:  hayate receive --code "forest-river-mango-silver-orbit"
 ```
 
-One command on each machine. Files move — encrypted, compressed, and
-integrity-verified end to end.
+One command on each machine. Files move encrypted, compressed, and verified — directly
+over the local network.
+
+<div align="center">
+<img src="./assets/dashboard.png" alt="Hayate web dashboard" width="100%" />
+<br />
+<sub><code>hayate web</code> — token-gated, loopback-only dashboard with live peers and history.</sub>
+</div>
+
+## Contents
+
+- [Why Hayate](#why-hayate)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Command reference](#command-reference)
+- [Web dashboard](#web-dashboard)
+- [Scripting and automation](#scripting-and-automation)
+- [How it works](#how-it-works)
+- [Security model](#security-model)
+- [Performance](#performance)
+- [Comparison](#comparison)
+- [Library usage](#library-usage)
+- [Development](#development)
+- [Release](#release)
 
 ---
 
-## Overview
+## Why Hayate
 
-Moving a file between two machines in the same room should not require a cloud
-round-trip, an SSH daemon, or a chat app's attachment limit. Hayate is a single
-static binary that turns a local network into the fastest transfer medium you
-own. It pairs devices with a human-readable code phrase, discovers peers over
-mDNS and UDP broadcast, and pushes data over QUIC with application-layer
-encryption — no server, no configuration, no trusted third party.
+- **No infrastructure.** No relay, no rendezvous server, no SSH daemon. Two devices on the same
+  network are enough.
+- **Authenticated by a phrase.** A 4-word code (≈41 bits) is mixed into the key exchange, so only
+  the peer that knows it can derive the session key.
+- **Fast where it counts.** QUIC with 4 MiB frames, asynchronous read-ahead, and zstd + AEAD on
+  dedicated worker threads.
+- **Resumable and verifiable.** Interrupted files continue from the last frame boundary; checksums
+  cover the whole file, including the already-received prefix.
+- **Inspectable.** A local dashboard shows peers and history without sending anything anywhere.
 
 ## Features
 
-|                        |                                                                                                                                                     |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Performance**        | QUIC with 4 MiB frames, 8-deep asynchronous read-ahead, and compression + AEAD on dedicated worker threads.                                         |
-| **Encryption**         | Ephemeral X25519 key agreement, HKDF-SHA256, per-frame AEAD (AES-256-GCM or ChaCha20-Poly1305), all via [ring](https://github.com/briansmith/ring). |
-| **Zero configuration** | 4-word pairing phrases locate and authenticate peers over mDNS + UDP broadcast. Direct `ip:port` addressing works too.                              |
-| **Resumable**          | Interrupted single-file transfers continue from the last 4 MiB frame (`receive --resume`); already-complete files are hash-verified without resending. |
-| **Control**            | `--bandwidth-limit` throughput caps, named peers (`peers` + `send --to`), interactive receiver picking (`send --pick`), local transfer `history`.   |
-| **Portability**        | One self-contained binary for macOS, Linux, Windows, and Android (Termux) — x64 and arm64.                                                          |
-| **Scriptability**      | NDJSON event stream, stable documented exit codes, `--quiet` / `--verbose`, machine-readable `--format json`.                                       |
+| | |
+| --- | --- |
+| **Transport** | QUIC (compio: io_uring / IOCP / kqueue), 4 MiB frames, 8-deep read-ahead, 48 MB flow windows |
+| **Encryption** | Ephemeral X25519 ECDH, HKDF-SHA256, per-frame AES-256-GCM or ChaCha20-Poly1305 |
+| **Pairing** | 4-word phrases, mDNS + UDP discovery, direct `ip:port`, optional `--code` passphrase |
+| **Integrity** | BLAKE3 (default) or SHA-256 over plaintext; size and frame validation on receive |
+| **Resume** | Single-file transfers continue from the last 4 MiB boundary; complete files are re-verified |
+| **Compression** | zstd level 1, skipped for already-compressed formats; per-frame so resume still works |
+| **Control** | `--bandwidth-limit`, named peers, interactive picker (`send --pick`), overwrite policy |
+| **Dashboard** | `hayate web`: drag-and-drop send, built-in receive listener, live progress, history, token auth |
+| **Scriptability** | NDJSON events (`schema: hayate/1`), stable exit codes, `--quiet` / `--verbose` |
+| **Platforms** | macOS, Linux, Windows — one static binary each (Android/Termux builds from source) |
 
-Under the hood, Hayate runs on [compio](https://github.com/compio-rs/compio), a
-completion-based async runtime (io_uring / IOCP / kqueue) — the same class of
-kernel primitives used by modern high-throughput servers.
+Under the hood Hayate runs on [compio](https://github.com/compio-rs/compio), a completion-based
+async runtime built on the same kernel primitives as modern high-throughput servers.
 
 ---
 
 ## Installation
 
-### npm (recommended)
+### Shell installer
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-cli-installer.sh | sh
+```
+
+Windows PowerShell: run `hayate-cli-installer.ps1` from the
+[latest release](https://github.com/ShiinaSaku/Hayate/releases).
+
+### npm
 
 ```bash
 npm install -g @shiinasaku/hayate
-hayate --help
+# or run it without installing:
+npx @shiinasaku/hayate --help
 ```
 
-The installer resolves the correct prebuilt binary for your platform as an
-optional dependency: macOS, Linux, Windows, and Android/Termux, each in x64 and
-arm64.
+The package downloads the matching prebuilt binary (macOS, Linux, Windows; x64 or arm64) at
+install time.
 
 ### GitHub Releases
 
-Prebuilt archives (`.tar.gz` / `.zip`) and `.deb` packages, published with
-`SHA256SUMS.txt` and npm provenance attestation:
-[latest release](https://github.com/ShiinaSaku/Hayate/releases).
-
-### Cargo (library)
-
-```bash
-cargo add hayate
-```
-
-The transfer engine ships as a [library crate](https://docs.rs/hayate) — build
-your own interface on top of it.
+Prebuilt archives (`.tar.xz` / `.zip`), installers, `sha256.sum`, and build-provenance
+attestations: [latest release](https://github.com/ShiinaSaku/Hayate/releases).
 
 ### From source
 
 ```bash
 git clone https://github.com/ShiinaSaku/Hayate.git
 cd Hayate
-cargo build --release -p hayate-cli
+mise run build          # or: cargo build --release -p hayate-cli
 ./target/release/hayate --help
 ```
 
-Requires **Rust 1.96** (edition 2024).
+Requires **Rust 1.96** (edition 2024). The dashboard bundle is committed, so no JavaScript
+toolchain is needed to build the CLI.
+
+### Library
+
+```bash
+cargo add hayate
+```
+
+The transfer engine ships as a [library crate](https://docs.rs/hayate) — build your own
+interface on top of it.
 
 ---
 
-## Usage
+## Quick start
 
 ### Pairing mode — no IP addresses
 
 ```bash
-# Sender — prints a one-time code phrase and waits
+# Sender: prints a one-time phrase and waits
 hayate send ./photos.zip
 
-# Receiver — joins with the same phrase
+# Receiver: joins with the same phrase
 hayate receive --code "forest-river-mango-silver-orbit"
 ```
 
-The phrase authenticates the session: it seeds key derivation, so a wrong
-phrase fails decryption and the transfer aborts.
+A wrong phrase fails AEAD authentication and the transfer aborts.
 
 ### Direct mode — you know the address
 
@@ -124,128 +161,204 @@ hayate receive --port 50001 --output ./downloads
 hayate send ./archive.tar.gz 192.168.1.50:50001
 ```
 
-Pass `--code <phrase>` on **both** sides to authenticate a direct transfer as
-well; the phrase then acts as an out-of-band passphrase.
+Pass `--code <phrase>` on **both** sides to authenticate a direct transfer too; the phrase then
+acts as an out-of-band passphrase.
 
 ### Directories
 
-Directories stream as a tar archive, compressed and encrypted on the fly.
-Extraction rejects absolute paths, `..` components, and symlink escapes.
+Directories stream as a tar archive, compressed and encrypted on the fly. Extraction rejects
+absolute paths, `..` components, symlink escapes, and hard-link traversal.
 
 ```bash
-hayate send ./my-project
-hayate receive --code "harbor-lantern-cedar-quartz-drift" --output ./downloads/
+hayate send ./my-project 192.168.1.50:50001
 ```
 
-### Peer discovery
+### Find receivers
 
 ```bash
-hayate discover
-hayate discover --timeout 5 --cidr 192.168.1.0/24
+hayate discover                       # mDNS + UDP query, usually ~3s
+hayate discover --scan                # also probe every host on the subnet
+hayate discover --cidr 10.0.0.0/16    # sweep an explicit network
 ```
+
+Receivers advertise over mDNS and answer a UDP query, so discovery is instant on a normal LAN.
+Subnet sweeps are capped at 4096 hosts and honour the interface netmask (`/22`, `/16`, …).
 
 ---
 
 ## Command reference
 
-### `hayate send <PATH> [TARGET]`
+### `hayate send [PATH] [TARGET]`
 
-| Flag                      | Description                                  | Default                      |
-| ------------------------- | -------------------------------------------- | ---------------------------- |
-| `PATH`                    | File or directory to send                    | required                     |
-| `TARGET`                  | Receiver `ip:port` (omit for pairing)        | —                            |
-| `--code <phrase>`         | Pairing phrase (or passphrase with a target) | auto-generated when unpaired |
-| `-z, --compress[=<bool>]` | Zstd compression                             | on                           |
-| `--no-compress`           | Disable compression (conflicts with `-z`)    | off                          |
-| `--hash <algo>`           | Integrity algorithm: `blake3` or `sha256`    | `blake3`                     |
-| `--no-progress`           | Hide the progress bar                        | off                          |
+| Flag | Description | Default |
+| --- | --- | --- |
+| `PATH` | File or directory to send | interactive picker |
+| `TARGET` | Receiver `ip:port` or `hostname:port` | pairing mode |
+| `--to <NAME>` | Send to a saved peer | — |
+| `--pick` | Scan the LAN and choose a receiver | off |
+| `--code <phrase>` | Pairing phrase (or passphrase with a target) | generated when unpaired |
+| `-z, --compress[=<bool>]` | zstd compression | on |
+| `--no-compress` | Disable compression | off |
+| `--hash <algo>` | `blake3` or `sha256` | `blake3` |
+| `--bandwidth-limit <RATE>` | Cap throughput (`10MiB`, `500KiB`, `2M`) | unlimited |
+| `--no-progress` | Hide the progress bar | off |
 
 ### `hayate receive`
 
-| Flag                 | Description            | Default                   |
-| -------------------- | ---------------------- | ------------------------- |
-| `-b, --bind <addr>`  | Bind address           | `0.0.0.0` (`HAYATE_BIND`) |
-| `-p, --port <port>`  | Listen port            | `50001` (`HAYATE_PORT`)   |
-| `-o, --output <dir>` | Save directory         | `.`                       |
-| `--code <phrase>`    | Join a pairing session | none                      |
-| `--auto-accept`      | Skip the accept prompt | off                       |
-| `--no-progress`      | Hide the progress bar  | off                       |
+| Flag | Description | Default |
+| --- | --- | --- |
+| `-b, --bind <addr>` | Bind address | `0.0.0.0` (`HAYATE_BIND`) |
+| `-p, --port <port>` | Listen port | `50001` (`HAYATE_PORT`) |
+| `-o, --output <dir>` | Save directory (created when missing) | `.` |
+| `--code <phrase>` | Join a pairing session | none |
+| `--auto-accept` | Skip the accept prompt | off |
+| `--resume` | Continue interrupted single-file transfers | off |
+| `--overwrite` | Replace existing destination files | prompt / refuse |
+| `--no-overwrite` | Refuse transfers whose destination exists | off |
+| `--once` | Exit after the first transfer (or rejection) | off |
+| `--no-progress` | Hide the progress bar | off |
 
 ### `hayate discover`
 
-| Flag                   | Description                   | Default |
-| ---------------------- | ----------------------------- | ------- |
-| `-t, --timeout <secs>` | Scan timeout                  | `15`    |
-| `--cidr <cidr>`        | Subnet, e.g. `192.168.1.0/24` | auto    |
+| Flag | Description | Default |
+| --- | --- | --- |
+| `-t, --timeout <secs>` | Discovery / scan budget | `15` |
+| `--scan` | Also sweep every host on the subnet | off |
+| `--cidr <cidr>` | Sweep an explicit network | auto |
+
+### `hayate web`
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--bind <ip>` | Interface to bind | `127.0.0.1` |
+| `--port <port>` | Dashboard port | `8787` |
+| `--allow-lan` | Expose beyond loopback (not recommended) | off |
+
+### Peers, history, docs
+
+```bash
+hayate peers add laptop 192.168.1.20:50001
+hayate send ./movie.mkv --to laptop
+hayate peers list
+hayate history -n 10 --format json
+hayate docs            # in-terminal handbook
+hayate man             # roff man page (hidden command)
+```
 
 ### Global flags
 
-| Flag                             | Description                            |
-| -------------------------------- | -------------------------------------- |
-| `--color <auto\|always\|never>`  | Color policy                           |
+| Flag | Description |
+| --- | --- |
+| `--color <auto\|always\|never>` | Color policy |
 | `--format <pretty\|plain\|json>` | Human UI, plain text, or NDJSON events |
-| `-q, --quiet`                    | Less output (repeatable)               |
-| `-v, --verbose`                  | More detail (repeatable)               |
+| `-q, --quiet` | Less output (repeatable) |
+| `-v, --verbose` | More detail (repeatable) |
 
-The full reference lives inside the binary: `hayate docs`.
+`hayate docs` renders the full reference in the terminal, including topics for `send`,
+`receive`, `discover`, `web`, `security`, and exit codes.
+
+---
+
+## Web dashboard
+
+```bash
+hayate web                 # prints http://127.0.0.1:8787/?t=<token>
+hayate web --port 9000
+```
+
+The dashboard is deliberately small and local:
+
+- Live state arrives over **Server-Sent Events** (peers, transfers, receive status).
+- Everything stays on the machine: the dashboard talks only to the local Hayate engine.
+
+The UI is a SvelteKit SPA (Tailwind + shadcn-svelte, Tabler icons) built into `web/build` and embedded in the
+binary, so `hayate web` has no runtime asset dependencies. Transfers run through the same engine
+as the CLI; the browser is just another front end.
 
 ---
 
 ## Scripting and automation
 
-`--format json` emits one NDJSON event per line on stdout — stages, progress,
-peers, summaries — safe to consume from any language.
+`--format json` emits one NDJSON event per line on stdout, tagged with `schema: hayate/1`:
 
 ```bash
-hayate send ./build.tar.zst --format json | jq -r 'select(.type=="summary") | .speed_bps'
+hayate send ./build.tar.zst --format json \
+  | jq -r 'select(.event == "transfer_complete") | .speed_bps'
 ```
 
 Exit codes are stable and documented (`hayate docs exit`):
 
-| Code | Meaning                          |
-| ---: | -------------------------------- |
-|    0 | Success                          |
-|    1 | General runtime / transfer error |
-|    2 | Usage / argument error           |
-|    3 | Receiver rejected the transfer   |
-|    4 | Protocol version mismatch        |
-|    5 | Invalid pairing passphrase       |
-|    6 | Timed out                        |
-|    7 | Cancelled by the user            |
-|  130 | Interrupted (Ctrl+C / Esc)       |
+| Code | Meaning |
+| ---: | --- |
+| 0 | Success |
+| 1 | General runtime / transfer error |
+| 2 | Usage / argument error |
+| 3 | Receiver rejected the transfer |
+| 4 | Protocol version mismatch |
+| 5 | Invalid pairing passphrase |
+| 6 | Timed out |
+| 7 | Cancelled by the user |
+| 130 | Interrupted (Ctrl+C / Esc) |
 
 ---
 
-## Shell completions
+## How it works
 
-```bash
-hayate completions bash --install   # ~/.bash_completion.d/hayate
-hayate completions zsh --install    # ~/.zsh/completions/_hayate
-hayate completions fish --install   # ~/.config/fish/completions/hayate.fish
-hayate completions powershell       # print to stdout
+```text
+Disk → [8 async reads × 4 MiB] → [worker threads: zstd + AEAD] → [QUIC window] → Wire
+                                                      ↓
+                             receiver: decrypt → reorder → hash → sequential write
 ```
 
-After `--install`, Hayate prints the exact lines to add to your shell's rc
-file. Fish loads completions automatically on the next session.
+1. **Connect.** The sender dials the receiver over QUIC with an ephemeral self-signed certificate
+   (trust-on-first-use); the application-layer handshake is the real authentication.
+2. **Exchange.** Both sides contribute ephemeral X25519 keys; the receiver picks the cipher
+   (AES-256-GCM when hardware-accelerated, ChaCha20-Poly1305 otherwise) and the sender sends
+   encrypted metadata.
+3. **Consent.** The receiver accepts or rejects and, for files, sends a resume offset aligned down
+   to a frame boundary.
+4. **Stream.** Files are read ahead, compressed per frame, AEAD-sealed with a fresh nonce, and
+   written in order. Directories are streamed as a tar archive.
+5. **Verify.** Both sides hash the plaintext, including any resumed prefix, and report a
+   `blake3$…` or `sha256$…` checksum.
+
+---
+
+## Security model
+
+| Layer | Primitive |
+| --- | --- |
+| Key agreement | Ephemeral X25519 ECDH |
+| Key derivation | HKDF-SHA256, transcript-bound; passphrase mixed into the IKM |
+| Frame encryption | AES-256-GCM or ChaCha20-Poly1305, random 96-bit nonce per frame |
+| Integrity | BLAKE3 or SHA-256 over plaintext, plus AEAD per frame |
+| Metadata | Filename and size encrypted before use |
+| Directory safety | Rejects `..`, absolute paths, symlink escapes, hard-link traversal |
+| Dashboard | Loopback bind, per-launch 128-bit token, `Host` check, strict CSP |
+
+What Hayate does **not** do:
+
+- **Discovery is unauthenticated.** mDNS advertisements and UDP replies are hints; the handshake
+  authenticates the transfer.
+- **Direct mode without `--code` is unauthenticated.** Anyone on the path who can intercept QUIC
+  could impersonate the receiver. Use pairing or a shared `--code` on untrusted networks.
+- **No internet traversal.** Hayate is a LAN tool; it does not hole-punch NAT or use a relay.
+
+All cryptography is provided by [ring](https://github.com/briansmith/ring) — no hand-rolled
+primitives.
 
 ---
 
 ## Performance
 
-```text
-Disk → [8 async reads × 4 MiB] → [worker threads: zstd + AEAD] → [QUIC window] → Wire
-```
-
-- **Read-ahead** — concurrent `read_at` keeps the disk busy while cryptography
-  runs.
-- **Worker threads** — compression and AEAD execute on dedicated threads
-  connected by channels, never blocking the async event loop.
-- **Cipher negotiation** — AES-256-GCM with hardware AES, ChaCha20-Poly1305
-  otherwise (override with `HAYATE_FORCE_CHACHA20`).
-- **Selective compression** — zstd level 1, skipped for already-compressed
-  extensions (`.zip`, `.mp4`, …).
-- **Ordered disk writes** — the receiver reorders frames before writing, so
-  disk I/O stays sequential.
+- **Read-ahead** — concurrent `read_at` calls keep the disk busy while cryptography runs.
+- **Worker threads** — compression and AEAD execute on dedicated threads connected by channels,
+  never blocking the async event loop.
+- **Cipher negotiation** — AES-256-GCM with hardware AES, ChaCha20-Poly1305 otherwise
+  (`HAYATE_FORCE_CHACHA20` overrides).
+- **Selective compression** — zstd level 1, skipped for already-compressed extensions (`.zip`,
+  `.mp4`, …).
+- **Ordered writes** — the receiver reorders frames before writing, keeping disk I/O sequential.
 
 ### Linux socket buffers
 
@@ -260,37 +373,15 @@ macOS and Windows size UDP buffers automatically.
 
 ---
 
-## Security model
-
-| Layer            | Primitive                                                    |
-| ---------------- | ------------------------------------------------------------ |
-| Key agreement    | Ephemeral X25519 ECDH                                        |
-| Key derivation   | HKDF-SHA256, transcript-bound; passphrase mixed into the IKM |
-| Frame encryption | AES-256-GCM or ChaCha20-Poly1305, fresh nonce per frame      |
-| Integrity        | BLAKE3 or SHA-256 over plaintext                             |
-| Metadata         | Filename and size encrypted before use                       |
-| Directory safety | Rejects `..`, absolute paths, symlink escapes                |
-
-In pairing mode, only a peer that knows the phrase can derive the session key —
-a wrong phrase fails metadata AEAD and the transfer aborts. Discovery itself is
-unauthenticated by design; **the handshake is what authenticates the transfer**.
-Direct mode relies on network locality unless you pass `--code` on both sides
-as a passphrase.
-
-All cryptography is provided by [ring](https://github.com/briansmith/ring) —
-no hand-rolled primitives.
-
----
-
 ## Comparison
 
-| Tool           | Transport    | Discovery         | Encryption        | Server needed      | Android    |
-| -------------- | ------------ | ----------------- | ----------------- | ------------------ | ---------- |
-| scp / rsync    | TCP / SSH    | manual IP         | SSH               | sshd               | limited    |
-| Magic Wormhole | TCP / TLS    | rendezvous server | PAKE              | yes (public relay) | via Python |
-| LocalSend      | HTTP / HTTPS | mDNS              | TLS               | no                 | yes        |
-| croc           | TCP relay    | code phrase       | PAKE              | optional relay     | via Go     |
-| **Hayate**     | **QUIC**     | **mDNS + UDP**    | **X25519 + AEAD** | **no**             | **native** |
+| Tool | Transport | Discovery | Encryption | Server needed | Web UI |
+| --- | --- | --- | --- | --- | --- |
+| scp / rsync | TCP / SSH | manual IP | SSH | sshd | no |
+| Magic Wormhole | TCP / TLS | rendezvous server | PAKE | yes (public relay) | no |
+| LocalSend | HTTP / HTTPS | mDNS | TLS | no | no |
+| croc | TCP relay | code phrase | PAKE | optional relay | no |
+| **Hayate** | **QUIC** | **mDNS + UDP query** | **X25519 + AEAD** | **no** | **local dashboard** |
 
 ---
 
@@ -321,10 +412,9 @@ async fn main() -> Result<(), hayate::EngineError> {
 }
 ```
 
-Public APIs never expose compio types, but the returned futures must run on a
-**compio** runtime. For custom interfaces, the staged API reports every
-lifecycle step: `HayateSender::send_with`, `HayateReceiver::receive_with`,
-`ListeningReceiver`, and `TransferStage`. Documentation:
+Public APIs never expose compio types, but the returned futures must run on a **compio** runtime.
+For custom interfaces, the staged API reports every lifecycle step: `HayateSender::send_with`,
+`HayateReceiver::receive_with`, `ListeningReceiver`, and `TransferStage`. Documentation:
 [docs.rs/hayate](https://docs.rs/hayate).
 
 ---
@@ -332,24 +422,38 @@ lifecycle step: `HayateSender::send_with`, `HayateReceiver::receive_with`,
 ## Development
 
 ```bash
-just check          # fmt (nightly rustfmt) + clippy + tests
-just fmt            # cargo +nightly fmt
-just clippy         # clippy --workspace --all-targets -D warnings
-just test           # cargo test --workspace
+mise run check      # fmt (nightly rustfmt) + clippy + tests + dashboard types
+mise run test       # cargo test --workspace --all-targets
+mise run web        # rebuild web/build after changing the dashboard
+mise run build      # release binary for this host
+mise run android    # Termux binary (aarch64-linux-android)
 ```
 
-| Task            | Command                 |
-| --------------- | ----------------------- |
-| Release binary  | `bun run build`         |
-| Cross-compile   | `bun run build:all`     |
-| Debian packages | `bun run build:deb`     |
-| Android         | `bun run build:android` |
+Repository layout:
 
-Cross-builds are driven by `build.ts` (`cargo-zigbuild` for Linux, `cargo-ndk`
-for Android). Releases are versioned with
-[Tegami](https://tegami.fuma-nama.dev) and published to crates.io and npm by
-GitHub Actions over OIDC trusted publishing, with SHA-256 checksums and npm
-provenance attestation.
+| Path | Contents |
+| --- | --- |
+| `hayate/` | Transfer engine library (published to crates.io) |
+| `hayate-cli/` | `hayate` binary: clap, progress UI, dashboard host |
+| `web/` | SvelteKit + Tailwind + shadcn-svelte dashboard (Bun + Vite) |
+| `hayate-cli/src/web/` | Embedded HTTP/SSE server and static asset serving |
+
+The dashboard builds into `web/build`, which is committed and embedded with `include_dir!`, so
+`cargo build` needs no JavaScript toolchain. Run `mise run web` and commit the result after UI
+changes; CI verifies the bundle is current.
+
+---
+
+## Release
+
+Releases are automated with two community tools:
+
+- [**release-plz**](https://release-plz.dev) opens the version/changelog PR and publishes `hayate`
+  to crates.io using OIDC trusted publishing (no stored registry token).
+- [**cargo-dist**](https://axodotdev.github.io/cargo-dist) builds archives and installers, publishes
+  the npm package, and creates the GitHub Release with build-provenance attestations.
+
+See [`RELEASE.md`](./RELEASE.md) for the one-time setup and the exact flow.
 
 ---
 

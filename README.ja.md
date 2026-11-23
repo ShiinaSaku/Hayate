@@ -31,6 +31,12 @@ $ hayate send ./photos.zip
 
 両方のマシンで 1 コマンドずつ。ファイルは暗号化・圧縮され、エンドツーエンドで整合性が検証されて届きます。
 
+<div align="center">
+<img src="./assets/dashboard.png" alt="Hayate web ダッシュボード" width="100%" />
+<br />
+<sub><code>hayate web</code> — トークン認証付き・ループバック限定のダッシュボード。</sub>
+</div>
+
 ---
 
 ## 概要
@@ -44,7 +50,9 @@ $ hayate send ./photos.zip
 | **パフォーマンス** | QUIC、4 MiB フレーム、8 段の非同期先読み。圧縮と AEAD は専用ワーカースレッドで実行します。                                                                  |
 | **暗号化**         | 一時的な X25519 鍵合意、HKDF-SHA256、フレーム単位の AEAD（AES-256-GCM または ChaCha20-Poly1305）。すべて [ring](https://github.com/briansmith/ring) 経由。 |
 | **ゼロ設定**       | 4 語のペアリングフレーズが mDNS + UDP ブロードキャストでピアを探索・認証します。`ip:port` の直接指定も可能です。                                            |
-| **ポータビリティ** | macOS・Linux・Windows・Android（Termux）向けの自己完結バイナリ 1 つ。x64 / arm64 の両対応。                                                                 |
+| **探索**           | 受信側が mDNS 広告と UDP クエリに応答するため `hayate discover` は即座。`--scan` はネットマスク対応のサブネットスイープ。                                   |
+| **ダッシュボード** | `hayate web` がトークン認証付きのループバック限定ダッシュボードを提供。ピア、デバイス情報、転送履歴を表示。                                                   |
+| **ポータビリティ** | macOS・Linux・Windows 向けの自己完結バイナリ 1 つ。x64 / arm64 の両対応（Android/Termux はソースからビルド）。                                               |
 | **スクリプト対応** | NDJSON イベントストリーム、安定した文書化済み終了コード、`--quiet` / `--verbose`、機械可読な `--format json`。                                              |
 
 内部では、完了ベースの非同期ランタイム [compio](https://github.com/compio-rs/compio)（io_uring / IOCP / kqueue）上で動作しています。現代の高スループットサーバーと同じクラスのカーネルプリミティブです。
@@ -53,18 +61,27 @@ $ hayate send ./photos.zip
 
 ## インストール
 
-### npm（推奨）
+### シェルインストーラ
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-cli-installer.sh | sh
+```
+
+Windows は同じリリースの `hayate-cli-installer.ps1` を実行してください。
+
+### npm
 
 ```bash
 npm install -g @shiinasaku/hayate
 hayate --help
 ```
 
-プラットフォームに合ったビルド済みバイナリが optional dependency として自動で解決されます。macOS・Linux・Windows・Android/Termux、それぞれ x64 と arm64 に対応しています。
+インストール時に macOS・Linux・Windows（x64 / arm64）向けのビルド済みバイナリを取得します。
 
 ### GitHub Releases
 
-ビルド済みアーカイブ（`.tar.gz` / `.zip`）と `.deb` パッケージを公開しています。`SHA256SUMS.txt` と npm provenance 証明付きです:
+ビルド済みアーカイブ（`.tar.xz` / `.zip`）、インストーラ、`sha256.sum`、ビルド provenance attestation を公開しています:
 [最新リリース](https://github.com/ShiinaSaku/Hayate/releases)。
 
 ### Cargo（ライブラリ）
@@ -123,9 +140,26 @@ hayate receive --code "harbor-lantern-cedar-quartz-drift" --output ./downloads/
 ### ピア探索
 
 ```bash
-hayate discover
-hayate discover --timeout 5 --cidr 192.168.1.0/24
+hayate discover                       # mDNS + UDP クエリ（通常 ~3 秒）
+hayate discover --scan                # サブネット全ホストもスキャン
+hayate discover --cidr 10.0.0.0/16    # 明示的なネットワークをスキャン
 ```
+
+受信側は mDNS で広告し、UDP クエリにも応答するため、通常の LAN では即座に見つかります。
+サブネットスキャンは 4096 ホストまでに制限され、インターフェースのネットマスク
+（`/22`、`/16` など）を尊重します。
+
+### Web ダッシュボード
+
+```bash
+hayate web                 # http://127.0.0.1:8787/?t=<token> を表示
+hayate web --port 9000
+```
+
+ループバック限定のダッシュボードを起動します。ファイルをドロップして検出済みピアや入力した
+`ip:port` へ送信でき、**Start receiving** で `~/Downloads/Hayate` への受信を開始できます。
+進捗は SSE で更新され、完了した転送は履歴に残ります。起動ごとに変わるトークンが必要で、
+ループバック外に公開するには `--allow-lan` を明示してください。
 
 ---
 
@@ -135,12 +169,15 @@ hayate discover --timeout 5 --cidr 192.168.1.0/24
 
 | フラグ                    | 説明                                                 | デフォルト               |
 | ------------------------- | ---------------------------------------------------- | ------------------------ |
-| `PATH`                    | 送信するファイルまたはディレクトリ                   | 必須                     |
+| `PATH`                    | 送信するファイルまたはディレクトリ                   | 対話ピッカー             |
 | `TARGET`                  | 受信側の `ip:port`（省略時はペアリング）             | —                        |
+| `--to <NAME>`             | 保存済みピアへ送信                                   | —                        |
+| `--pick`                  | LAN をスキャンして受信側を選択                       | オフ                     |
 | `--code <phrase>`         | ペアリングフレーズ（ターゲット指定時はパスフレーズ） | 非ペアリング時は自動生成 |
 | `-z, --compress[=<bool>]` | Zstd 圧縮                                            | オン                     |
 | `--no-compress`           | 圧縮を無効化（`-z` と競合）                          | オフ                     |
 | `--hash <algo>`           | 整合性アルゴリズム: `blake3` または `sha256`         | `blake3`                 |
+| `--bandwidth-limit <RATE>` | 帯域制限（`10MiB`、`500KiB`、`2M`）                | 無制限                   |
 | `--no-progress`           | プログレスバーを非表示                               | オフ                     |
 
 ### `hayate receive`
@@ -299,20 +336,16 @@ async fn main() -> Result<(), hayate::EngineError> {
 ## 開発
 
 ```bash
-just check          # fmt (nightly rustfmt) + clippy + tests
-just fmt            # cargo +nightly fmt
-just clippy         # clippy --workspace --all-targets -D warnings
-just test           # cargo test --workspace
+mise run check      # fmt (nightly rustfmt) + clippy + tests + ダッシュボード型チェック
+mise run test       # cargo test --workspace --all-targets
+mise run web        # ダッシュボード変更後に web/build を再生成
+mise run build      # このホスト向けリリースバイナリ
+mise run android    # Termux 用バイナリ (aarch64-linux-android)
 ```
 
-| タスク            | コマンド                |
-| ----------------- | ----------------------- |
-| リリースバイナリ  | `bun run build`         |
-| クロスコンパイル  | `bun run build:all`     |
-| Debian パッケージ | `bun run build:deb`     |
-| Android           | `bun run build:android` |
+ダッシュボードは `web/`（SvelteKit + Tailwind + shadcn-svelte、Bun + Vite）にあります。ビルド成果物は CLI バイナリに埋め込まれるため、UI を変更したら `mise run web` を実行して `web/build` をコミットしてください。
 
-クロスビルドは `build.ts` が担います（Linux は `cargo-zigbuild`、Android は `cargo-ndk`）。リリースは [Tegami](https://tegami.fuma-nama.dev) でバージョニングされ、GitHub Actions から OIDC トラステッドパブリッシングで crates.io と npm に公開されます。SHA-256 チェックサムと npm provenance 証明付きです。
+リリースは [release-plz](https://release-plz.dev)（バージョン管理・crates.io への OIDC 公開）と [cargo-dist](https://axodotdev.github.io/cargo-dist)（アーカイブ、shell/PowerShell/npm インストーラ、GitHub attestation）で行います。詳細は `RELEASE.md`。
 
 ---
 

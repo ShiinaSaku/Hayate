@@ -7,8 +7,8 @@ two crates:
 - `hayate/` — library (the transfer engine), published to crates.io
 - `hayate-cli/` — binary (`hayate`), `publish = false`, thin clap wrapper over the library
 
-Both crates share one `[workspace.package] version` in the root `Cargo.toml` — bump it by hand
-before a release (see Release below).
+Both crates share one `[workspace.package] version` in the root `Cargo.toml` — release-plz bumps
+it in lockstep (see Release below). Never edit published `CHANGELOG.md` history by hand.
 
 ## Fast facts an agent can easily get wrong
 
@@ -31,17 +31,20 @@ before a release (see Release below).
   `rand_core::UnwrapErr`) — `rand_core::OsRng` was removed in 0.10. No dual-version `rand_core`
   pin is needed; keep both crates on the latest 0.10 line.
 
-## Commands (run from workspace root; `just` orchestrates)
+## Commands (run from workspace root; `mise` orchestrates)
 
-- `just fmt` / `just fmt-check` — `cargo +nightly fmt`. `rustfmt.toml` opts into nightly-only
-  options (`unstable_features`, `imports_granularity`, `wrap_comments`, …), so formatting
-  requires the nightly toolchain (`rustup component add rustfmt --toolchain nightly`); the CI
-  `fmt` job installs nightly for this reason.
-- `just clippy` — `cargo clippy --workspace --all-targets -- -D warnings` (also compiles
+- `mise run fmt` / `mise run fmt-check` — `cargo +nightly fmt`. `rustfmt.toml` opts into
+  nightly-only options (`unstable_features`, `imports_granularity`, `wrap_comments`, …), so
+  formatting requires the nightly toolchain (`rustup component add rustfmt --toolchain nightly`);
+  the CI `fmt` job installs nightly for this reason.
+- `mise run clippy` — `cargo clippy --workspace --all-targets -- -D warnings` (also compiles
   `hayate/examples/*`)
-- `just test` — `cargo test --workspace` — **not** `--all-targets`, so examples aren't
-  compile-checked here; `just clippy` is what catches example breakage from API changes
-- `just check` — fmt-check + clippy + test; run this before considering work done
+- `mise run test` — `cargo test --workspace --all-targets`
+- `mise run check` — fmt-check + clippy + test + dashboard type-check; run before considering
+  work done
+- `mise run web` — `bun install --frozen-lockfile && bun run build` inside `web/`; regenerates
+  `web/build`, which is **embedded at compile time and committed** (see Dashboard below)
+- `mise run web-dev` — Vite dev server for the dashboard
 - Single test: `cargo test -p hayate <name>` or `cargo test -p hayate-cli <name>`
   (add `-- --nocapture` for stdout)
 - Doctests run automatically inside `cargo test --workspace` (several in `lib.rs`, `runner.rs`,
@@ -55,7 +58,9 @@ before a release (see Release below).
 
 `fmt` · `clippy` (`-D warnings`) · `msrv` (`cargo check --workspace --all-targets` pinned to
 **exactly 1.96**, not just `stable`) · `audit` (RustSec advisories via `rustsec/audit-check`) ·
-`test` matrix (ubuntu/macos/windows/windows-11-arm, `cargo test --workspace --all-targets`).
+`semver` (cargo-semver-checks) · `test` matrix (ubuntu/macos/windows/windows-11-arm) ·
+`web` (Bun install + `svelte-check` + build, then fails if `web/build` differs from the
+committed bundle — regenerate with `mise run web` and commit it).
 `missing_docs = "warn"` in `Cargo.toml` is a plain rustc lint, but clippy's `-D warnings`
 promotes it to a hard failure — every new public item needs a doc comment or CI's `clippy` job
 fails.
@@ -69,7 +74,7 @@ fails.
 | `protocol.rs`   | Wire format: version negotiation, `Metadata`, frame encoding           |
 | `crypto.rs`     | X25519 ECDH, HKDF-SHA256, AEAD seal/open, cipher negotiation           |
 | `network.rs`    | QUIC endpoint setup, ephemeral TLS certs (`rcgen`)                     |
-| `discovery.rs`  | mDNS + UDP-broadcast peer discovery                                    |
+| `discovery.rs`  | mDNS announce/browse + UDP query/respond + pairing broadcast            |
 | `pool.rs`       | `BufferPool` (flume-backed) for hot-path buffer reuse                  |
 | `tar.rs`        | Directory ⇄ tar streaming; extraction rejects abs paths/`..`/symlinks  |
 | `local_addr.rs` | Interface/subnet detection (`if-addrs`)                                |
@@ -78,28 +83,28 @@ fails.
 calls → `indicatif`/`console` progress UI — plus two local-only stores: `peers.rs`
 (named peers JSON in the user config dir, backs `hayate peers` / `send --to`) and
 `history.rs` (transfer log as JSONL in the user data dir, backs `hayate history`).
-`subcmd/man.rs` renders the roff man page from the clap definitions (hidden `hayate man`;
-`build.ts` captures it into archives and `.deb` packages).
+`subcmd/man.rs` renders the roff man page from the clap definitions (hidden `hayate man`).
 
-### Protocol/threading notes (read before touching `transfer.rs` or `crypto.rs`)
+## Dashboard (`hayate web`)
 
-- Handshake: QUIC connects with an ephemeral self-signed cert (trust-on-first-use) → app-level
-  X25519 exchange → receiver picks cipher (AES-256-GCM if HW-accelerated, else
-  ChaCha20-Poly1305) → encrypted `Metadata` → accept/reject byte → 8-byte resume offset
-  (wire protocol **v7**; v6 peers fail the version check cleanly).
-- Payload: 4 MiB frames, 8-deep async read-ahead, AEAD-encrypted, zstd-compressed unless the
-  file extension is a known pre-compressed format. Frames are independently compressed with
-  random per-frame nonces — that is what makes offset resume possible.
-- Resume: receiver-driven (`HayateReceiver::resume`). Offset aligned down to a frame boundary;
-  both sides hash the skipped prefix locally so checksums cover the full file. Directory
-  (tar-stream) transfers always start fresh.
-- AEAD/zstd work runs on dedicated `std::thread` workers connected via `flume` channels,
-  deliberately kept off the compio event-loop threads — don't add blocking crypto/compression
-  calls directly on the async path.
-- Receiver reorders frames in a `BTreeMap` before writing, to guarantee sequential disk I/O.
-- Discovery channel ID = `derive_channel_id(phrase)` = hex(SHA-256(phrase)[..4]). Tests pin the
-  output to exactly 8 lowercase hex chars — a dropped leading zero would silently break pairing
-  between mismatched versions.
+`web/` is a **SvelteKit + Tailwind + shadcn-svelte** SPA (Bun + Vite, Tabler icons — `components.json` sets `iconLibrary: "tabler"`, never import Lucide). `hayate-cli/src/web/` is
+the Rust host: a hand-rolled HTTP/1.1 server on compio exposing `/api/{status,peers,history}`
+and an SSE stream, plus static file serving from the embedded bundle.
+
+- The UI is built into `web/build` and embedded with `include_dir!`; that directory is
+  **committed** so `cargo build`/`test` need no JavaScript toolchain. After changing anything
+  under `web/src`, run `mise run web` and commit the resulting `web/build` (CI enforces this).
+- Transfers: `POST /api/send` spools the uploaded body to a temp directory and hands it to
+  `HayateSender`; `POST /api/receive/{start,stop}` runs a listener on its own thread/runtime,
+  auto-accepting into the configured folder (default `~/Downloads/Hayate`). Progress and history
+  are recorded through the same modules as the CLI.
+- Security model: loopback bind by default (`--allow-lan` overrides), per-launch token in a
+  `HttpOnly; SameSite=Strict` cookie, `X-Hayate-Request: 1` on POSTs (CSRF), `Host` check, strict
+  CSP, 16 GiB upload cap, basename-only filenames, and a 64-connection cap. `script-src
+  'unsafe-inline'` is required by SvelteKit's inline bootstrap; the page renders no untrusted
+  HTML.
+- `web/src/routes/+layout.ts` sets `ssr = false`; the adapter is `@sveltejs/adapter-static`
+  with `fallback: 'index.html'` (SPA mode).
 
 ## Conventions
 
@@ -107,96 +112,25 @@ calls → `indicatif`/`console` progress UI — plus two local-only stores: `pee
 - `EngineError` (thiserror) in the library; `anyhow::Result` in the CLI — don't cross the two
 - Every source file starts with a `//!` module doc comment
 
-## Release (see `RELEASE.md` for the full walkthrough)
+## Release (see `RELEASE.md`)
 
-Tegami drives versioning and publishing. Binary releases are built and uploaded automatically by GitHub Actions.
+Two community tools, one tag:
 
-- Write a pending changelog under `.tegami/` (see the Release workflow section below).
-- Merge the Tegami version PR to bump versions and publish the `hayate` crate to crates.io.
-- The `publish` workflow creates a GitHub release (titled `Hayate vX.Y.Z — <codename>`; codenames per major version live in `scripts/tegami.mts`) and then explicitly invokes the `release-binaries` workflow via `workflow_call`. `release-binaries` is **not** wired to the `release: published` event, because that event does not reliably fire when the release is created by another workflow using the default `GITHUB_TOKEN`. `release-binaries` builds archives (and `.deb` packages) for Linux, macOS, Windows, and Android, and uploads them to the release.
-- `hayate-cli` stays `publish = false`; only the library is published to crates.io.
-- Both crates bump in lockstep: `scripts/tegami.mts` groups them with `syncBump` + `syncGitTag` (one version, one tag, one release). `patches/tegami@*.patch` (bun `patchedDependencies`) fixes tegami's cargo plugin double-bumping the shared `[workspace.package]` version — do not delete it, and re-apply when bumping tegami until fixed upstream.
-- Publishing is **tokenless** on both registries (OIDC trusted publishing): crates.io via `rust-lang/crates-io-auth-action` in `publish.yml`, npm via `--provenance` + `id-token: write` in `release-binaries.yml`. No `CARGO_REGISTRY_TOKEN` / `NPM_TOKEN` secrets — the one-time dashboard config per registry is documented in `RELEASE.md`. One secret does exist: `RELEASE_PAT` (a PAT), needed because `publish.yml` triggers `release-binaries.yml` via `workflow_dispatch`, which 403s with the default `GITHUB_TOKEN`.
+- **release-plz** (`.github/workflows/release-plz.yml`) opens the version/changelog PR on every
+  push to `master`, then publishes `hayate` to crates.io via **OIDC trusted publishing**
+  (`id-token: write`, no `CARGO_REGISTRY_TOKEN`) and pushes the `vX.Y.Z` tag. Configuration lives
+  in `release-plz.toml` (`git_release_enable = false` — cargo-dist owns the GitHub Release).
+- **cargo-dist** (`.github/workflows/release.yml`, generated — do not hand-edit) builds on the
+  tag: archives, shell/PowerShell installers, an npm package, `SHA256SUMS`, and GitHub
+  attestations. Config: `dist-workspace.toml`; the generated file is refreshed with
+  `dist generate`.
+- `hayate-cli` stays `publish = false`; only the library goes to crates.io. Its
+  `[package.metadata.dist] dist = true` is what lets cargo-dist release the binary.
+- Both crates share `[workspace.package] version`; release-plz bumps it in lockstep.
+- Secrets: `NPM_TOKEN` (cargo-dist npm installer) and — for full automation — `RELEASE_PLZ_TOKEN`
+  (App/PAT so the release-plz tag push triggers `release.yml`; GitHub does not start workflows
+  for tags pushed with the default `GITHUB_TOKEN`). Without it, publish the crate then run
+  `gh workflow run release.yml --ref vX.Y.Z`.
+- Android/Termux builds are no longer in the release matrix (cargo-dist has no NDK cross
+  target): build locally with `mise run android`.
 - Never force-push or recreate a tag.
-
-## Binary builds
-
-Cross-platform binaries are built with `bun run build.ts`:
-
-- `bun run build` — native host target
-- `bun run build:all` — every target this host can reach
-- `bun run build:deb` — Linux targets plus `.deb` packages (requires `dpkg-deb` or GNU `ar`)
-- `bun run build:android` — include Android (Termux) targets (requires `cargo-ndk` or the Android NDK)
-- `bun run build:everything` — all of the above
-
-Linux cross-compiles use `cargo-zigbuild`. Android uses `cargo-ndk` when available, otherwise falls back to the NDK linker scripts in `.cargo/config.toml`.
-
-## npm distribution
-
-The release pipeline also publishes `@shiinasaku/hayate` to npm. The package is a small ESM wrapper that downloads the correct native binary as an optional dependency.
-
-```bash
-npm install -g @shiinasaku/hayate
-hayate --help
-```
-
-Platform packages:
-
-- `@shiinasaku/hayate-darwin-x64` / `@shiinasaku/hayate-darwin-arm64`
-- `@shiinasaku/hayate-linux-x64` / `@shiinasaku/hayate-linux-arm64`
-- `@shiinasaku/hayate-win32-x64` / `@shiinasaku/hayate-win32-arm64`
-- `@shiinasaku/hayate-android-x64` / `@shiinasaku/hayate-android-arm64`
-
-The npm release script is `bun run npm:release`. The wrapper (`npm/hayate/`) is TypeScript
-under `src/`, bundled with **tsdown** (`bun run npm:build`; requires Node ≥ 22.18 at build
-time, output targets Node 18) into `dist/` — the published layout stays `index.js` +
-`index.d.ts` + `bin/hayate.js`. The script downloads the GitHub release archives plus
-`SHA256SUMS.txt`, verifies every archive's SHA-256 before repackaging (and rejects absolute /
-`..` paths inside archives), then publishes the scoped packages — with `--provenance`
-attestation in GitHub Actions, authenticated via OIDC trusted publishing (no token; the job
-has `id-token: write` and installs Node 24 for tsdown + npm 11 — see the `npm` job in
-`release-binaries.yml`).
-
-## TypeScript release scripts
-
-`build.ts`, `scripts/tegami.mts`, and the npm wrapper sources (`npm/hayate/src/`) are checked
-with `bun run typecheck` (which runs `bun tsc --noEmit`); `npm/hayate/` has its own
-`tsconfig.json` for the tsdown build.
-
-# Release workflow
-
-This repository uses [Tegami](https://tegami.fuma-nama.dev) for versioning and publishing.
-
-## Write changelog files
-
-Create pending changelog files under `.tegami/` as `YYYY-MM-DD-{hash}.md`.
-
-See the [changelog format docs](https://tegami.fuma-nama.dev/changelog) for details.
-
-### Example
-
-```md
----
-packages:
-  "npm:@acme/ui": patch
----
-
-### Fix button hover state
-
-The hover color now matches the design system.
-```
-
-### Package references
-
-Use package names, ids, or groups in frontmatter. For example:
-
-- `"@acme/ui"` — package name
-- `"npm:@acme/ui"` — package id
-- `"group:acme"` — every package in a group
-
-Rules:
-
-- Include YAML frontmatter with `packages`
-- Include at least one `#`, `##`, or `###` heading in the body
-- Write user-facing release notes under each heading
-- Do not edit the publish lock file (`.tegami/publish-lock.yaml`) or package `CHANGELOG.md` files directly

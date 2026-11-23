@@ -1,5 +1,5 @@
 # Nightly rustfmt features (requires `cargo +nightly fmt`; CI installs nightly
-# for the fmt job — see .github/workflows/ci.yml and the justfile).
+# for the fmt job — see .github/workflows/ci.yml and mise.toml).
 unstable_features = true
 style_edition = "2024"
 max_width = 100
