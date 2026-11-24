@@ -861,9 +861,11 @@ fn resolve_target(raw: &str) -> Result<SocketAddr> {
 
 /// Reduces a client-supplied name to a safe basename.
 fn sanitize_filename(name: &str) -> Option<String> {
-    let base = Path::new(name).file_name()?.to_string_lossy().to_string();
-    let cleaned: String =
-        base.chars().filter(|ch| !ch.is_control() && *ch != '/' && *ch != '\\').take(200).collect();
+    // Treat both separators as path separators on every platform. On Unix a
+    // backslash is a legal filename byte, but the same bundle is served by
+    // Windows builds where it would escape the intended basename.
+    let base = name.rsplit(['/', '\\']).find(|part| !part.is_empty())?;
+    let cleaned: String = base.chars().filter(|ch| !ch.is_control()).take(200).collect();
     if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
         return None;
     }
@@ -1250,7 +1252,10 @@ mod tests {
         assert_eq!(sanitize_filename("notes.txt").as_deref(), Some("notes.txt"));
         assert_eq!(sanitize_filename(".."), None);
         assert_eq!(sanitize_filename(""), None);
-        assert_eq!(sanitize_filename("a\\b.txt").as_deref(), Some("ab.txt"));
+        assert_eq!(sanitize_filename("a\\b.txt").as_deref(), Some("b.txt"));
+        assert_eq!(sanitize_filename("a/b\\c.txt").as_deref(), Some("c.txt"));
+        assert_eq!(sanitize_filename("dir/").as_deref(), Some("dir"));
+        assert_eq!(sanitize_filename("C:\\Users\\me\\file.txt").as_deref(), Some("file.txt"));
     }
 
     #[test]

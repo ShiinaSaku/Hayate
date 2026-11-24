@@ -1,7 +1,6 @@
 //! Hayate CLI application.
 
 mod cli;
-mod cli_tests;
 mod exit_code;
 mod history;
 mod output;
@@ -156,4 +155,21 @@ fn run() -> Result<ExitCode> {
         }
         Ok(ExitCode::SUCCESS)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_request;
+
+    #[test]
+    fn version_flags_only_count_before_a_subcommand() {
+        let args = |v: &[&str]| -> Vec<String> {
+            std::iter::once("hayate".to_owned()).chain(v.iter().map(|s| (*s).to_owned())).collect()
+        };
+        assert_eq!(version_request(&args(&["-V"])), Some(true));
+        assert_eq!(version_request(&args(&["--version"])), Some(false));
+        assert_eq!(version_request(&args(&["--color", "never", "--version"])), Some(false));
+        assert_eq!(version_request(&args(&["send", "-V"])), None);
+        assert_eq!(version_request(&args(&["send", "file", "--version"])), None);
+    }
 }
