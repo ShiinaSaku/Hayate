@@ -24,8 +24,10 @@ it in lockstep (see Release below). Never edit published `CHANGELOG.md` history 
   `local_addr`/`protocol`. `transfer`, `tar`, `pool` are `pub` but `#[doc(hidden)]` — unstable,
   change freely; CI's `semver` job (cargo-semver-checks) guards the stable surface.
 - Tests are plain `#[test]` (sync), even where the code under test is async — this repo has no
-  `#[compio::test]` usage. Tests live inline in `#[cfg(test)] mod tests` blocks; there are no
-  `tests/` directories.
+  `#[compio::test]` usage. Library tests live inline in `#[cfg(test)] mod tests` blocks. The CLI
+  end-to-end suite lives in `hayate-cli/tests/cli.rs` because Cargo only sets
+  `CARGO_BIN_EXE_hayate` for integration tests; keep it there rather than spawning a binary from
+  `current_exe()`.
 - The engine uses `x25519-dalek` 3, which shares `rand_core` 0.10 with the workspace's
   `rand = "0.10"`. System randomness now comes from `getrandom::SysRng` (wrapped via
   `rand_core::UnwrapErr`) — `rand_core::OsRng` was removed in 0.10. No dual-version `rand_core`
@@ -51,6 +53,8 @@ it in lockstep (see Release below). Never edit published `CHANGELOG.md` history 
   `local_addr.rs`)
 - Benchmarks (`hayate/benches/`) are feature-gated: `cargo bench --features benchmarks` — a bare
   `cargo bench` silently builds nothing (`required-features` skips every bench target)
+- Loopback throughput: `cargo run --release --example throughput -- <large-file> [rounds]`
+  (`HAYATE_BENCH_COMPRESS=0` disables zstd for a raw-wire number)
 - Extra aliases in `.cargo/config.toml`: `check-all`/`clippy-all`/`test-all`/`bench-all`
   (`--workspace --all-targets` shortcuts), `android-aarch64`/`android-x86_64`/`android-all`
 
@@ -70,9 +74,9 @@ fails.
 | Module          | Role                                                                   |
 | --------------- | ---------------------------------------------------------------------- |
 | `runner.rs`     | Public `HayateSender`/`HayateReceiver` builders — the real entrypoints |
-| `transfer.rs`   | Handshake state machine + chunked send/receive pipeline                |
+| `transfer.rs`   | v8 handshake + bounded, hasher-threaded chunked send/receive pipeline   |
 | `protocol.rs`   | Wire format: version negotiation, `Metadata`, frame encoding           |
-| `crypto.rs`     | X25519 ECDH, HKDF-SHA256, AEAD seal/open, cipher negotiation           |
+| `crypto.rs`     | X25519 ECDH, Argon2id stretch, HKDF-SHA256, AEAD, cipher negotiation    |
 | `network.rs`    | QUIC endpoint setup, ephemeral TLS certs (`rcgen`)                     |
 | `discovery.rs`  | mDNS announce/browse + UDP query/respond + pairing broadcast            |
 | `pool.rs`       | `BufferPool` (flume-backed) for hot-path buffer reuse                  |
@@ -87,8 +91,8 @@ calls → `indicatif`/`console` progress UI — plus two local-only stores: `pee
 
 ## Dashboard (`hayate web`)
 
-`web/` is a **SvelteKit + Tailwind + shadcn-svelte** SPA (Bun + Vite, Tabler icons — `components.json` sets `iconLibrary: "tabler"`, never import Lucide). `hayate-cli/src/web/` is
-the Rust host: a hand-rolled HTTP/1.1 server on compio exposing `/api/{status,peers,history}`
+`web/` is a **SvelteKit + Tailwind** SPA (Bun + Vite, Tabler icons, and a small custom design
+system in `src/routes/layout.css`). `hayate-cli/src/web/` is the Rust host: a hand-rolled HTTP/1.1 server on compio exposing `/api/{status,peers,history}`
 and an SSE stream, plus static file serving from the embedded bundle.
 
 - The UI is built into `web/build` and embedded with `include_dir!`; that directory is

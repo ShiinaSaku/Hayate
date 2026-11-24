@@ -6,7 +6,7 @@
 
 **Encrypted, compressed LAN file transfer — one binary, no cloud, no accounts, no SSH.**
 
-QUIC transport · X25519 + AEAD · 4-word pairing phrases · local web dashboard
+QUIC transport · X25519 + Argon2id + AEAD · 4-word pairing phrases · local web dashboard
 
 [![Website](https://img.shields.io/badge/website-hayate.shiina.xyz-6ea8fe?style=flat-square)](https://hayate.shiina.xyz)
 [![CI](https://img.shields.io/github/actions/workflow/status/ShiinaSaku/Hayate/ci.yml?style=flat-square&label=CI)](https://github.com/ShiinaSaku/Hayate/actions/workflows/ci.yml)
@@ -61,8 +61,9 @@ over the local network.
 
 - **No infrastructure.** No relay, no rendezvous server, no SSH daemon. Two devices on the same
   network are enough.
-- **Authenticated by a phrase.** A 4-word code (≈41 bits) is mixed into the key exchange, so only
-  the peer that knows it can derive the session key.
+- **Authenticated by a phrase.** A 4-word code (≈41 bits) is stretched with memory-hard
+  Argon2id and mixed into the key exchange, so only the peer that knows it can derive the
+  session key.
 - **Fast where it counts.** QUIC with 4 MiB frames, asynchronous read-ahead, and zstd + AEAD on
   dedicated worker threads.
 - **Resumable and verifiable.** Interrupted files continue from the last frame boundary; checksums
@@ -74,11 +75,11 @@ over the local network.
 | | |
 | --- | --- |
 | **Transport** | QUIC (compio: io_uring / IOCP / kqueue), 4 MiB frames, 8-deep read-ahead, 48 MB flow windows |
-| **Encryption** | Ephemeral X25519 ECDH, HKDF-SHA256, per-frame AES-256-GCM or ChaCha20-Poly1305 |
-| **Pairing** | 4-word phrases, mDNS + UDP discovery, direct `ip:port`, optional `--code` passphrase |
+| **Encryption** | Ephemeral X25519 ECDH, Argon2id phrase stretch, HKDF-SHA256, per-frame AES-256-GCM or ChaCha20-Poly1305 |
+| **Pairing** | 4-word phrases, mDNS + UDP discovery, direct `ip:port`, optional `--passphrase` |
 | **Integrity** | BLAKE3 (default) or SHA-256 over plaintext; size and frame validation on receive |
 | **Resume** | Single-file transfers continue from the last 4 MiB boundary; complete files are re-verified |
-| **Compression** | zstd level 1, skipped for already-compressed formats; per-frame so resume still works |
+| **Compression** | zstd level 1, skipped for compressed formats and disabled adaptively for incompressible data |
 | **Control** | `--bandwidth-limit`, named peers, interactive picker (`send --pick`), overwrite policy |
 | **Dashboard** | `hayate web`: drag-and-drop send, built-in receive listener, live progress, history, token auth |
 | **Scriptability** | NDJSON events (`schema: hayate/1`), stable exit codes, `--quiet` / `--verbose` |
@@ -161,8 +162,13 @@ hayate receive --port 50001 --output ./downloads
 hayate send ./archive.tar.gz 192.168.1.50:50001
 ```
 
-Pass `--code <phrase>` on **both** sides to authenticate a direct transfer too; the phrase then
-acts as an out-of-band passphrase.
+Pass `--passphrase <secret>` on **both** sides to authenticate a direct transfer; the handshake
+aborts before any payload if the secrets differ.
+
+```bash
+hayate receive --port 50001 --output ./downloads --passphrase "correct horse battery staple"
+hayate send ./archive.tar.gz 192.168.1.50:50001 --passphrase "correct horse battery staple"
+```
 
 ### Directories
 
@@ -196,7 +202,8 @@ Subnet sweeps are capped at 4096 hosts and honour the interface netmask (`/22`, 
 | `TARGET` | Receiver `ip:port` or `hostname:port` | pairing mode |
 | `--to <NAME>` | Send to a saved peer | — |
 | `--pick` | Scan the LAN and choose a receiver | off |
-| `--code <phrase>` | Pairing phrase (or passphrase with a target) | generated when unpaired |
+| `--code <phrase>` | Pairing phrase | generated when unpaired |
+| `--passphrase <secret>` | Out-of-band secret for a direct target | none |
 | `-z, --compress[=<bool>]` | zstd compression | on |
 | `--no-compress` | Disable compression | off |
 | `--hash <algo>` | `blake3` or `sha256` | `blake3` |
@@ -211,6 +218,7 @@ Subnet sweeps are capped at 4096 hosts and honour the interface netmask (`/22`, 
 | `-p, --port <port>` | Listen port | `50001` (`HAYATE_PORT`) |
 | `-o, --output <dir>` | Save directory (created when missing) | `.` |
 | `--code <phrase>` | Join a pairing session | none |
+| `--passphrase <secret>` | Authenticate a direct sender | none |
 | `--auto-accept` | Skip the accept prompt | off |
 | `--resume` | Continue interrupted single-file transfers | off |
 | `--overwrite` | Replace existing destination files | prompt / refuse |
@@ -271,7 +279,7 @@ The dashboard is deliberately small and local:
 - Live state arrives over **Server-Sent Events** (peers, transfers, receive status).
 - Everything stays on the machine: the dashboard talks only to the local Hayate engine.
 
-The UI is a SvelteKit SPA (Tailwind + shadcn-svelte, Tabler icons) built into `web/build` and embedded in the
+The UI is a SvelteKit SPA (Tailwind + Tabler icons, custom design system) built into `web/build` and embedded in the
 binary, so `hayate web` has no runtime asset dependencies. Transfers run through the same engine
 as the CLI; the browser is just another front end.
 
@@ -305,9 +313,9 @@ Exit codes are stable and documented (`hayate docs exit`):
 ## How it works
 
 ```text
-Disk → [8 async reads × 4 MiB] → [worker threads: zstd + AEAD] → [QUIC window] → Wire
-                                                      ↓
-                             receiver: decrypt → reorder → hash → sequential write
+Disk → [8 async reads × 4 MiB] → [hasher thread] → [workers: zstd + AEAD] → [QUIC window] → Wire
+                                                                                  ↓
+                                    receiver: decrypt → reorder → hash → sequential write
 ```
 
 1. **Connect.** The sender dials the receiver over QUIC with an ephemeral self-signed certificate
@@ -317,8 +325,9 @@ Disk → [8 async reads × 4 MiB] → [worker threads: zstd + AEAD] → [QUIC wi
    encrypted metadata.
 3. **Consent.** The receiver accepts or rejects and, for files, sends a resume offset aligned down
    to a frame boundary.
-4. **Stream.** Files are read ahead, compressed per frame, AEAD-sealed with a fresh nonce, and
-   written in order. Directories are streamed as a tar archive.
+4. **Stream.** Files are read ahead, hashed on a dedicated thread, adaptively compressed, and
+   AEAD-sealed with a unique per-frame nonce (a per-worker counter, not a CSPRNG call in the hot
+   loop), then written in order. Directories are streamed as a tar archive.
 5. **Verify.** Both sides hash the plaintext, including any resumed prefix, and report a
    `blake3$…` or `sha256$…` checksum.
 
@@ -329,8 +338,8 @@ Disk → [8 async reads × 4 MiB] → [worker threads: zstd + AEAD] → [QUIC wi
 | Layer | Primitive |
 | --- | --- |
 | Key agreement | Ephemeral X25519 ECDH |
-| Key derivation | HKDF-SHA256, transcript-bound; passphrase mixed into the IKM |
-| Frame encryption | AES-256-GCM or ChaCha20-Poly1305, random 96-bit nonce per frame |
+| Key derivation | Argon2id-stretched passphrase, then transcript-bound HKDF-SHA256 |
+| Frame encryption | AES-256-GCM or ChaCha20-Poly1305, unique per-frame 96-bit nonce |
 | Integrity | BLAKE3 or SHA-256 over plaintext, plus AEAD per frame |
 | Metadata | Filename and size encrypted before use |
 | Directory safety | Rejects `..`, absolute paths, symlink escapes, hard-link traversal |
@@ -340,25 +349,40 @@ What Hayate does **not** do:
 
 - **Discovery is unauthenticated.** mDNS advertisements and UDP replies are hints; the handshake
   authenticates the transfer.
-- **Direct mode without `--code` is unauthenticated.** Anyone on the path who can intercept QUIC
-  could impersonate the receiver. Use pairing or a shared `--code` on untrusted networks.
+- **Direct mode without `--passphrase` is unauthenticated.** Anyone on the path who can intercept
+  QUIC could impersonate the receiver. Use pairing or a shared `--passphrase` on untrusted
+  networks.
 - **No internet traversal.** Hayate is a LAN tool; it does not hole-punch NAT or use a relay.
 
-All cryptography is provided by [ring](https://github.com/briansmith/ring) — no hand-rolled
-primitives.
+AEAD, HKDF, and hashing primitives come from [ring](https://github.com/briansmith/ring) and
+[BLAKE3](https://github.com/BLAKE3-team/BLAKE3); passphrase stretching uses the RustCrypto
+`argon2` crate. No hand-rolled primitives.
 
 ---
 
 ## Performance
 
 - **Read-ahead** — concurrent `read_at` calls keep the disk busy while cryptography runs.
+- **Dedicated hasher** — BLAKE3/SHA-256 runs on its own thread, so multi-MiB hashes never stall
+  the compio completion loop.
+- **Bounded pipeline** — every payload-stage queue is bounded; a slow disk or network applies
+  backpressure instead of filling RAM with queued 4 MiB buffers.
 - **Worker threads** — compression and AEAD execute on dedicated threads connected by channels,
   never blocking the async event loop.
 - **Cipher negotiation** — AES-256-GCM with hardware AES, ChaCha20-Poly1305 otherwise
   (`HAYATE_FORCE_CHACHA20` overrides).
-- **Selective compression** — zstd level 1, skipped for already-compressed extensions (`.zip`,
-  `.mp4`, …).
+- **Adaptive compression** — zstd level 1, skipped for already-compressed extensions and
+  automatically disabled after 16 MiB if the payload is effectively incompressible.
 - **Ordered writes** — the receiver reorders frames before writing, keeping disk I/O sequential.
+
+Measure your own hardware with:
+
+```bash
+cargo run --release --example throughput -- ./large.bin 3
+```
+
+Throughput depends heavily on whether the OS exposes UDP GSO/GRO: Linux has both, macOS
+currently does not, so the same pipeline moves far fewer packets per second there.
 
 ### Linux socket buffers
 
@@ -381,7 +405,12 @@ macOS and Windows size UDP buffers automatically.
 | Magic Wormhole | TCP / TLS | rendezvous server | PAKE | yes (public relay) | no |
 | LocalSend | HTTP / HTTPS | mDNS | TLS | no | no |
 | croc | TCP relay | code phrase | PAKE | optional relay | no |
-| **Hayate** | **QUIC** | **mDNS + UDP query** | **X25519 + AEAD** | **no** | **local dashboard** |
+| sendme | iroh QUIC | ticket / iroh DNS | TLS | iroh relay fallback | no |
+| **Hayate** | **QUIC (compio)** | **mDNS + UDP query** | **X25519 + Argon2id + AEAD** | **no** | **local dashboard** |
+
+`sendme` is the closest direct comparison. It wins on internet/NAT traversal because it is built on
+iroh; Hayate deliberately stays infrastructure-free and LAN-local, where it avoids relay/DNS round
+trips, compresses payloads, and pairs with a short code instead of a long ticket.
 
 ---
 
@@ -389,7 +418,7 @@ macOS and Windows size UDP buffers automatically.
 
 ```toml
 [dependencies]
-hayate = "6"
+hayate = "7"
 compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
 ```
 
@@ -435,7 +464,7 @@ Repository layout:
 | --- | --- |
 | `hayate/` | Transfer engine library (published to crates.io) |
 | `hayate-cli/` | `hayate` binary: clap, progress UI, dashboard host |
-| `web/` | SvelteKit + Tailwind + shadcn-svelte dashboard (Bun + Vite) |
+| `web/` | SvelteKit + Tailwind dashboard with a custom design system (Bun + Vite) |
 | `hayate-cli/src/web/` | Embedded HTTP/SSE server and static asset serving |
 
 The dashboard builds into `web/build`, which is committed and embedded with `include_dir!`, so

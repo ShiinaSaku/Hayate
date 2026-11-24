@@ -25,7 +25,7 @@ Driven by [`compio`](https://github.com/compio-rs/compio) (io_uring / IOCP / kqu
 
 - **Resumable** — interrupted single-file transfers continue from the last 4 MiB frame; already-complete files are hash-verified without resending a byte.
 - **Throttleable** — `bandwidth_limit(bytes_per_sec)` caps sustained throughput for shared LANs.
-- **Encrypted end to end** — ephemeral X25519 + HKDF-SHA256 + per-frame AEAD (AES-256-GCM with hardware acceleration, ChaCha20-Poly1305 elsewhere).
+- **Encrypted end to end** — ephemeral X25519 + Argon2id phrase stretch + HKDF-SHA256 + per-frame AEAD (AES-256-GCM with hardware acceleration, ChaCha20-Poly1305 elsewhere).
 - **Integrity-checked** — every payload is hashed (`blake3` or `sha256`) on both sides; sizes are verified exactly.
 - **Staged API** — observe connect → handshake → offer → transfer → finish via `TransferStage` for rich UIs.
 - **Stable surface** — the semver guarantee covers `runner` and crate-root re-exports; `#[doc(hidden)]` internals are free to evolve.
@@ -34,7 +34,7 @@ Driven by [`compio`](https://github.com/compio-rs/compio) (io_uring / IOCP / kqu
 
 ```toml
 [dependencies]
-hayate = "6.1"
+hayate = "7.0"
 compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
 ```
 
@@ -138,7 +138,7 @@ CI runs `cargo-semver-checks` on every push, so accidental breaks in the stable 
 
 `compio` uses completion-based I/O: buffers are owned and passed by value to I/O operations, returning via `compio::BufResult`.
 
-Hayate keeps blocking work off the executor: `tar` extraction and zstd/AEAD run on dedicated `std::thread` workers connected by `flume` channels. The receiver reorders frames in a `BTreeMap` to guarantee sequential disk writes.
+Hayate keeps blocking work off the executor: hashing, `tar` extraction, and zstd/AEAD run on dedicated `std::thread` workers connected by bounded `flume` channels. Payload frames use per-worker counter nonces, so the hot loop never calls the CSPRNG. The receiver reorders frames in a `BTreeMap` to guarantee sequential disk writes.
 
 ## Safety Guarantees
 
@@ -148,7 +148,8 @@ Hayate treats network data as fundamentally hostile:
 - **Strict framing**: frames are length-capped and AEAD-verified before decompression.
 - **Size verification**: completed files must match the announced byte count exactly.
 - **Path sanitization**: directory extraction rejects absolute paths, `..` traversal, and symlinks; hard links are replayed only after their in-archive target exists.
-- **Version tolerance**: receivers accept older (v6) peers gracefully; truly incompatible versions fail fast with a clear `ProtocolMismatch` error.
+- **Strict versioning**: the wire protocol is v8; incompatible peers fail fast with a clear
+  `ProtocolMismatch` error instead of deriving mismatched keys.
 
 ## License
 
