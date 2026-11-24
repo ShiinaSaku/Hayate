@@ -1,0 +1,30 @@
+---
+title: "JSON events"
+description: "The NDJSON events hayate prints with --format json: event names, fields and the hayate/1 schema tag for automation."
+---
+
+With `--format json`, Hayate prints one JSON object per line. Regular events go to stdout and errors go to stderr. Every object has an `event` field naming its type and a `"schema": "hayate/1"` field you can check before parsing.
+
+```json
+{"event":"transfer_complete","filename":"build.tar.zst","size":52428800,"elapsed_secs":0.84,"speed_bps":62415238,"checksum":"blake3$9f2c…","cipher":"AES-256-GCM","compressed":false,"schema":"hayate/1"}
+```
+
+## Events
+
+| Event | Fields | Emitted when |
+| --- | --- | --- |
+| `status` | `level`, `message` | A status message. `level` is `info`, `ok` or `warn`. |
+| `stage` | `stage`, `detail` | The transfer moves to a new stage |
+| `field` | `key`, `value` | A single labeled value is reported |
+| `pairing_code` | `code`, `command` | `hayate send` generated a pairing phrase. `command` is what the receiver should run. |
+| `peer` | `name`, `address`, `os`, `rtt_ms` | Discovery found a receiver. `rtt_ms` is `null` when not measured. |
+| `discover_summary` | `count` | Discovery finished |
+| `transfer_offer` | `filename`, `size`, `kind`, `from`, `cipher`, `hash` | A receiver got an offer |
+| `transfer_info` | `title`, `fields` | A group of transfer details, with `fields` as an object of strings |
+| `transfer_complete` | `filename`, `size`, `elapsed_secs`, `speed_bps`, `checksum`, `cipher`, `compressed` | A transfer finished |
+| `integrity_verified` | `algo`, `checksum` | The checksum was verified |
+| `bound` | `address`, `backend` | A listener bound to an address. `backend` is the I/O backend, such as `io_uring`. |
+| `bound_addresses` | `addresses` | The addresses a receiver is reachable on |
+| `error` | `message` | A command failed. Printed on stderr. |
+
+Combine JSON output with [exit codes](/cli/exit-codes) to detect the failure type.

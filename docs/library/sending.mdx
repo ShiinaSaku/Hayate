@@ -1,0 +1,113 @@
+---
+title: "Sending"
+description: "Send files and directories from Rust with HayateSender: direct and pairing modes, passphrases, compression, hashing, bandwidth limits and lifecycle stages."
+---
+
+`HayateSender` is a builder. Configure it, then call `send` or `send_with` with a path to a file or directory.
+
+## Direct mode
+
+Set the receiver's address with `target`:
+
+```rust
+use std::net::SocketAddr;
+use hayate::HayateSender;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let target: SocketAddr = "192.168.1.50:50001".parse().unwrap();
+
+    let checksum = HayateSender::new()
+        .target(target)
+        .passphrase("correct horse battery staple".to_owned())
+        .send("photos", |bytes_sent| {
+            println!("sent {bytes_sent} bytes");
+            Ok(())
+        })
+        .await?;
+
+    println!("checksum {checksum}");
+    Ok(())
+}
+```
+
+`passphrase` is optional. Without it, a direct transfer is not authenticated. When you set it, the receiver must use the same passphrase.
+
+## Pairing mode
+
+Set a phrase with `code` and leave out `target`. The sender broadcasts on the LAN until a receiver with the same phrase connects. The phrase also authenticates the key exchange.
+
+```rust
+use hayate::HayateSender;
+
+async fn run() -> Result<(), hayate::EngineError> {
+    HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .send("report.pdf", |_| Ok(()))
+        .await?;
+    Ok(())
+}
+```
+
+## Builder options
+
+| Method | Default | Description |
+| --- | --- | --- |
+| `target(SocketAddr)` | none | Receiver address for direct mode |
+| `code(String)` | none | Pairing phrase. Also used as the passphrase unless `passphrase` is set. |
+| `passphrase(String)` | none | Secret stretched with Argon2id into the key derivation |
+| `compress(bool)` | `true` | zstd compression |
+| `hash_algo(String)` | `"blake3"` | `"blake3"` or `"sha256"` |
+| `bandwidth_limit(u64)` | unlimited | Sustained throughput cap in bytes per second |
+
+## Progress
+
+The progress callback receives the total number of bytes written to the network so far. Return `Ok(())` to continue, or an `EngineError` to abort the transfer.
+
+`send` returns the payload checksum as a string such as `blake3$…`.
+
+## Lifecycle stages
+
+To drive a UI, use `send_with`. It takes a stage callback before the progress callback and returns a `SendOutcome`:
+
+```rust
+use hayate::{HayateSender, TransferStage};
+
+async fn run() -> Result<(), hayate::EngineError> {
+    let outcome = HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .send_with(
+            "photos",
+            |stage| {
+                match stage {
+                    TransferStage::Pairing { code } => println!("receiver runs: hayate receive --code {code}"),
+                    TransferStage::Ready { peer, total_size, .. } => println!("sending {total_size} bytes to {peer}"),
+                    _ => {}
+                }
+                Ok(())
+            },
+            |_bytes| Ok(()),
+        )
+        .await?;
+
+    println!("{} via cipher {}", outcome.checksum, outcome.cipher_id);
+    Ok(())
+}
+```
+
+`SendOutcome` has `checksum`, `meta`, `cipher_id`, `peer` and `total_size`.
+
+A sender reports these `TransferStage` variants:
+
+| Stage | Meaning |
+| --- | --- |
+| `Connecting { peer }` | Dialing a known receiver |
+| `Pairing { code }` | Broadcasting the phrase and waiting for a receiver |
+| `Connected { peer }` | QUIC connection established |
+| `Handshaking` | Version, cipher and key exchange in progress |
+| `Ready { meta, cipher_id, peer, total_size }` | Handshake done, payload about to start |
+| `Resuming { offset }` | The receiver asked to continue from a byte offset |
+| `Transferring { filename, total_size }` | Payload is flowing |
+| `Finishing` | Streams are being drained |
+
+`TransferStage` is `#[non_exhaustive]`, so always include a wildcard arm.

@@ -1,0 +1,59 @@
+---
+title: "Docs, completions and man page"
+sidebarTitle: "Docs and completions"
+description: "Reference for hayate docs, the in-terminal handbook, hayate completions for bash, zsh, fish and PowerShell, and the hidden hayate man command."
+---
+
+## hayate docs
+
+Prints a styled handbook in the terminal, or opens this site in your browser.
+
+```bash
+hayate docs            # full guide
+hayate docs send       # one topic
+hayate docs --web      # open the website
+```
+
+<ParamField path="TOPIC" type="string" default="all">
+  Topic to show: `all`, `start`, `send`, `receive`, `discover`, `web`, `peers`, `history`, `completions`, `exit`, `env`, `security` or `site`.
+</ParamField>
+
+<ParamField path="-w, --web" type="flag">
+  Open the online documentation in your browser.
+</ParamField>
+
+## hayate completions
+
+Prints a completion script for your shell, or installs it.
+
+```bash
+hayate completions zsh > _hayate     # print the script
+hayate completions zsh --install     # install it and print setup steps
+```
+
+<ParamField path="SHELL" type="bash | zsh | fish | powershell | elvish" required>
+  Shell to generate completions for.
+</ParamField>
+
+<ParamField path="--install" type="flag">
+  Write the script to a conventional location and print the setup steps for your shell, instead of printing the script.
+</ParamField>
+
+`--install` writes to these locations:
+
+| Shell | Path |
+| --- | --- |
+| bash | `~/.bash_completion.d/hayate` |
+| zsh | `~/.zsh/completions/_hayate` |
+| fish | `~/.config/fish/completions/hayate.fish` (loaded automatically) |
+| PowerShell (Windows only) | `~\Documents\PowerShell\Modules\hayate\hayate.ps1`, which you dot-source from your profile |
+
+`--install` doesn't support Elvish, or PowerShell outside Windows. Print the script instead.
+
+## hayate man
+
+Prints the Hayate man page in roff format. The command is hidden from `--help`.
+
+```bash
+hayate man > hayate.1
+```

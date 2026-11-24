@@ -1,0 +1,73 @@
+---
+title: "hayate receive"
+description: "Reference for hayate receive: listen for direct transfers or join a pairing session, with output directory, consent, resume and overwrite options."
+---
+
+```bash
+hayate receive [FLAGS]
+```
+
+Starts a receiver. With `--code`, it joins a pairing session and handles one transfer. Without it, it listens on a port and accepts transfers until you stop it or pass `--once`. Aliases: `recv`, `rx`.
+
+## Examples
+
+```bash
+# Join a pairing session
+hayate receive --code "forest-river-mango-silver-orbit"
+
+# Listen for direct transfers
+hayate receive --port 50001 --output ./downloads
+
+# Unattended: accept one transfer, never overwrite, resume partial files
+hayate receive --output /srv/incoming --auto-accept --no-overwrite --resume --once
+```
+
+## Flags
+
+<ParamField path="-b, --bind" type="ip" default="0.0.0.0">
+  Address to bind the QUIC listener to. Reads `HAYATE_BIND` when set.
+</ParamField>
+
+<ParamField path="-p, --port" type="port" default="50001">
+  Port to listen on. Reads `HAYATE_PORT` when set.
+</ParamField>
+
+<ParamField path="-o, --output" type="dir" default=".">
+  Directory to save received files into. Hayate creates it when it is missing.
+</ParamField>
+
+<ParamField path="--code" type="phrase">
+  Join a pairing session with the phrase the sender printed.
+</ParamField>
+
+<ParamField path="--passphrase" type="secret">
+  Shared secret for direct transfers. It must match the sender's `--passphrase`. Conflicts with `--code`.
+</ParamField>
+
+<ParamField path="--auto-accept" type="flag">
+  Accept every transfer without prompting. Required when there is no terminal to prompt on.
+</ParamField>
+
+<ParamField path="--resume" type="flag">
+  Continue interrupted single-file transfers from an existing partial file. See [resume](/guides/sending-and-receiving#resume-an-interrupted-transfer).
+</ParamField>
+
+<ParamField path="--overwrite" type="flag">
+  Replace existing destination files without asking. Conflicts with `--no-overwrite`.
+</ParamField>
+
+<ParamField path="--no-overwrite" type="flag">
+  Refuse transfers whose destination already exists.
+</ParamField>
+
+<ParamField path="--once" type="flag">
+  Exit after the first transfer or rejection.
+</ParamField>
+
+<ParamField path="--no-progress" type="flag">
+  Hide the progress bar, for example in Termux or headless sessions. Alias: `--no-tui`.
+</ParamField>
+
+Without `--overwrite` or `--no-overwrite`, Hayate asks before replacing an existing file, and refuses when there is no terminal.
+
+[Global flags](/cli/overview#global-flags) also apply.

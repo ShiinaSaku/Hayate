@@ -1,0 +1,135 @@
+---
+title: "Receiving"
+description: "Receive files and directories in Rust with HayateReceiver and ListeningReceiver: consent callbacks, pairing, passphrases, resume and multi-transfer listeners."
+---
+
+`HayateReceiver` is a builder. Call `receive` or `receive_with` to handle one transfer, or `listen` to accept several direct transfers in sequence. Run these futures inside a compio runtime, for example from `#[compio::main]`.
+
+## Direct mode
+
+Bind an address and wait for a sender:
+
+```rust
+use std::net::SocketAddr;
+use hayate::HayateReceiver;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let bind_addr: SocketAddr = "0.0.0.0:50001".parse().unwrap();
+
+    let (checksum, path) = HayateReceiver::new()
+        .bind(bind_addr)
+        .receive(
+            "./downloads",
+            |meta| {
+                println!("incoming {} ({} bytes)", meta.filename, meta.total_size);
+                true
+            },
+            |bytes_received| {
+                println!("received {bytes_received} bytes");
+                Ok(())
+            },
+        )
+        .await?;
+
+    println!("saved to {} ({checksum})", path.display());
+    Ok(())
+}
+```
+
+`receive` takes the output directory, a consent callback and a progress callback. Return `true` from the consent callback to accept the transfer, or `false` to reject it. It returns the checksum and the path the payload was written to.
+
+`receive` and `receive_with` wait up to one minute for a sender, then return an error.
+
+## Pairing mode
+
+Set the phrase the sender is broadcasting:
+
+```rust
+use hayate::HayateReceiver;
+
+async fn run() -> Result<(), hayate::EngineError> {
+    let (_checksum, _path) = HayateReceiver::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .auto_accept(true)
+        .receive("./downloads", |_| true, |_| Ok(()))
+        .await?;
+    Ok(())
+}
+```
+
+## Builder options
+
+| Method | Default | Description |
+| --- | --- | --- |
+| `bind(SocketAddr)` | `0.0.0.0:50001` | Local address for direct mode |
+| `code(String)` | none | Pairing phrase. Also used as the passphrase unless `passphrase` is set. |
+| `passphrase(String)` | none | Secret for direct mode. Must match the sender's passphrase. |
+| `auto_accept(bool)` | `false` | Accept every transfer without calling the consent callback |
+| `resume(bool)` | `false` | Continue interrupted single-file transfers from an existing partial file |
+
+## Choose the destination
+
+`receive_with` reports [lifecycle stages](/library/sending#lifecycle-stages) and lets the consent callback choose where to write. The callback receives the `Metadata` and the peer address. Return `Some(path)` to accept, or `None` to reject. It isn't called when `auto_accept` is on.
+
+```rust
+use std::path::PathBuf;
+use hayate::{HayateReceiver, TransferStage};
+
+async fn run() -> Result<(), hayate::EngineError> {
+    let outcome = HayateReceiver::new()
+        .receive_with(
+            "./downloads",
+            |stage| {
+                if let TransferStage::Offer { meta, peer, .. } = stage {
+                    println!("{peer} offers {}", meta.filename);
+                }
+                Ok(())
+            },
+            |meta, _peer| Some(PathBuf::from("./downloads").join(&meta.filename)),
+            |_bytes| Ok(()),
+        )
+        .await?;
+
+    println!("{} -> {}", outcome.checksum, outcome.path.display());
+    Ok(())
+}
+```
+
+`ReceiveOutcome` has `checksum`, `path`, `meta`, `cipher_id`, `peer` and `compressed` (true when at least one frame arrived compressed).
+
+Besides the sender's stages, a receiver reports `WaitingForPeer`, `Discovering { code }` and `Offer { meta, cipher_id, peer }`.
+
+## Accept several transfers
+
+`listen` binds once and returns a `ListeningReceiver`. Call `try_accept_one` in a loop to handle transfers one after another. It returns `Ok(None)` when the timeout passes with no connection, so you can check for cancellation between attempts.
+
+```rust
+use std::time::Duration;
+use hayate::{HayateReceiver, is_benign_peer_close};
+
+async fn run() -> Result<(), hayate::EngineError> {
+    let listener = HayateReceiver::new().auto_accept(true).listen().await?;
+    println!("listening on {}", listener.local_addr()?);
+
+    loop {
+        match listener
+            .try_accept_one(
+                Duration::from_secs(1),
+                "./downloads",
+                |_stage| Ok(()),
+                |_meta, _peer| None, // not called: auto_accept is on
+                |_bytes| Ok(()),
+            )
+            .await
+        {
+            Ok(Some(outcome)) => println!("saved {}", outcome.path.display()),
+            Ok(None) => {} // timeout; check a stop flag here
+            Err(err) if is_benign_peer_close(&err) => {}
+            Err(err) => return Err(err),
+        }
+    }
+}
+```
+
+`listen` supports direct mode only. With a pairing phrase set, it returns an error; use `receive_with` instead.

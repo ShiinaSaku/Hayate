@@ -1,0 +1,49 @@
+---
+title: "Find receivers"
+description: "Discover Hayate receivers on your network with mDNS and UDP queries, sweep subnets, and open the right firewall ports."
+---
+
+`hayate discover` lists the receivers running on your network, with their address, operating system and round-trip time.
+
+```bash
+hayate discover                       # mDNS + UDP query
+hayate discover --scan                # also probe every host on the subnet
+hayate discover --cidr 10.0.0.0/16    # sweep an explicit network
+```
+
+## How discovery works
+
+Hayate finds receivers in two phases:
+
+1. **Fast phase.** Hayate browses mDNS for the `_hayate._udp.local.` service and sends a UDP discovery query at the same time. This phase lasts up to 3 seconds and finds receivers on a typical LAN.
+2. **Subnet sweep.** Hayate probes hosts with a QUIC handshake. The sweep runs when the fast phase found nothing, or when you pass `--scan` or `--cidr`. It finds receivers that don't advertise, for example when mDNS is blocked.
+
+Sweeps follow the interface netmask (such as `/22` or `/16`) and are capped at 4096 hosts. If a network is larger, Hayate reports how many hosts it skipped so you can narrow it with `--cidr`. `--timeout` sets the overall budget in seconds (default `15`).
+
+To pick a receiver from the results and send to it in one step, use `hayate send <PATH> --pick`.
+
+## Ports
+
+If a firewall sits between your machines, allow these UDP ports:
+
+| Port | Used for |
+| --- | --- |
+| `50001` | QUIC transfers (default receive port; change it with `--port` or `HAYATE_PORT`) |
+| `50002` | Pairing-mode broadcasts from the sender |
+| `50003` | Discovery queries from `hayate discover` |
+| `5353` | mDNS |
+
+## Trust
+
+Discovery results are hints, not proof of identity. Any host on the network can answer a discovery query or advertise over mDNS. The handshake is the trust boundary: in pairing mode or with `--passphrase`, a peer that doesn't know the secret can't complete it. See the [threat model](/security/threat-model).
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No receivers found">
+    Check that `hayate receive` is running on the other machine and that both machines are on the same network. Try `hayate discover --scan`. Client isolation on guest Wi-Fi networks blocks device-to-device traffic entirely.
+  </Accordion>
+  <Accordion title="The receiver shows up but transfers time out">
+    A firewall is probably allowing discovery but blocking QUIC. Allow UDP on the receive port (`50001` by default). On Linux, also check the [socket buffer settings](/guides/performance#linux-socket-buffers).
+  </Accordion>
+</AccordionGroup>

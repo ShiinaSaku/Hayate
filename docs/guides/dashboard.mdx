@@ -1,0 +1,50 @@
+---
+title: "Web dashboard"
+description: "Use hayate web to send files by drag and drop, run a receive listener, and watch peers, transfers and history in a local, token-gated dashboard."
+---
+
+`hayate web` serves a small dashboard in your browser. It runs transfers through the same engine as the CLI, and it talks only to the Hayate process on your machine.
+
+<Frame>
+  <img src="/images/dashboard.png" alt="Hayate web dashboard with the send panel, nearby receivers and recent transfers" />
+</Frame>
+
+## Open the dashboard
+
+```bash
+hayate web
+```
+
+Hayate prints a URL such as `http://127.0.0.1:8787/?t=<token>`. Open it in your browser. The token is regenerated on every launch, so an old URL stops working once you restart `hayate web`.
+
+To use a different port:
+
+```bash
+hayate web --port 9000
+```
+
+## What you can do
+
+- **Send.** Drop a file onto the send panel, or click to browse. Pick a nearby receiver or type `ip:port`, then send. The browser uploads the file to Hayate, which sends it with the engine. Uploads are limited to 16 GiB.
+- **Receive.** Turn on the listener to accept transfers. It listens on port `50001` by default, auto-accepts incoming transfers and saves them to `~/Downloads/Hayate`. You can change the port and folder before you start it.
+- **Watch.** Active transfers, nearby receivers, recent history and this device's details (host, platform, version, uptime) update live over Server-Sent Events.
+
+The dashboard follows your system's light or dark theme, and you can switch it from the header.
+
+## Security
+
+The dashboard is built to stay on your machine:
+
+- It binds to `127.0.0.1` unless you pass `--allow-lan`. Hayate refuses to bind any other address without it.
+- Every request needs the per-launch 128-bit token, from the URL or the cookie the dashboard sets.
+- Requests whose `Host` header isn't a loopback address are rejected, which blocks DNS-rebinding attacks.
+- State-changing requests require a custom header that cross-site forms can't send.
+- Responses carry a strict Content Security Policy.
+
+<Warning>
+  `--allow-lan` exposes the dashboard, and the ability to send files from and receive files to this machine, to anyone on the network who obtains the token. Only use it on a network you trust.
+</Warning>
+
+## Reference
+
+See [`hayate web`](/cli/web) for every flag.

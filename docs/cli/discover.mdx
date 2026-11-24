@@ -1,0 +1,36 @@
+---
+title: "hayate discover"
+description: "Reference for hayate discover: find Hayate receivers with mDNS and UDP queries, and sweep local or explicit subnets."
+---
+
+```bash
+hayate discover [FLAGS]
+```
+
+Lists receivers on the local network with their address, operating system and round-trip time. Alias: `scan`.
+
+Hayate first browses mDNS and sends a UDP discovery query for up to 3 seconds. If that finds nothing, or you pass `--scan` or `--cidr`, it also sweeps the subnet with QUIC probes. See [find receivers](/guides/discovery).
+
+## Examples
+
+```bash
+hayate discover
+hayate discover --scan
+hayate discover --cidr 10.0.0.0/16 --timeout 30
+```
+
+## Flags
+
+<ParamField path="-t, --timeout" type="seconds" default="15">
+  Overall budget for discovery and the subnet sweep.
+</ParamField>
+
+<ParamField path="--scan" type="flag">
+  Also sweep every host in the local subnets. Slower, but finds receivers that don't advertise.
+</ParamField>
+
+<ParamField path="--cidr" type="cidr">
+  Sweep this network instead of the local subnets, for example `192.168.1.0/24`. Sweeps are capped at 4096 hosts.
+</ParamField>
+
+[Global flags](/cli/overview#global-flags) also apply.

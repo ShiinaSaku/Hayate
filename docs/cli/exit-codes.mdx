@@ -1,0 +1,30 @@
+---
+title: "Exit codes"
+description: "The stable exit codes the hayate binary returns, from success and usage errors to rejected transfers, wrong passphrases, timeouts and interrupts."
+---
+
+Hayate's exit codes are a stable contract for scripts. Values stay fixed across releases. New codes may be added, but existing ones are never renumbered.
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success |
+| `1` | General runtime or transfer error |
+| `2` | Usage or argument error |
+| `3` | The receiver rejected the transfer |
+| `4` | Protocol version mismatch between sender and receiver |
+| `5` | Invalid pairing phrase or passphrase: key exchange authentication failed |
+| `6` | Timed out while pairing, discovering or connecting |
+| `7` | Cancelled by the user |
+| `130` | Interrupted with Ctrl+C, or Esc or `q` after the grace period |
+
+Exit code `4` means the two machines run Hayate releases with incompatible wire protocols. Update both to the same release.
+
+You can also print this table in the terminal:
+
+```bash
+hayate docs exit
+```
+
+## Library errors
+
+Library users get the same information from [`EngineError`](/library/errors). The CLI maps `TransferRejected` to `3`, `ProtocolMismatch` to `4`, `InvalidPassphrase` to `5`, `TimedOut` to `6` and `Cancelled` to `7`.

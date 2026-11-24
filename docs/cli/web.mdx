@@ -1,0 +1,33 @@
+---
+title: "hayate web"
+description: "Reference for hayate web: serve the local, token-gated Hayate dashboard on a chosen interface and port."
+---
+
+```bash
+hayate web [FLAGS]
+```
+
+Serves the [web dashboard](/guides/dashboard) and prints its URL, including a per-launch access token. Alias: `dashboard`.
+
+## Examples
+
+```bash
+hayate web
+hayate web --port 9000
+```
+
+## Flags
+
+<ParamField path="--bind" type="ip" default="127.0.0.1">
+  Interface to bind the dashboard to. Hayate refuses a non-loopback address unless you also pass `--allow-lan`.
+</ParamField>
+
+<ParamField path="--port" type="port" default="8787">
+  Dashboard port.
+</ParamField>
+
+<ParamField path="--allow-lan" type="flag">
+  Allow binding beyond this machine. Not recommended: anyone with the token could send and receive files through it.
+</ParamField>
+
+[Global flags](/cli/overview#global-flags) also apply.

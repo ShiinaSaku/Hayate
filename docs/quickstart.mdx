@@ -1,0 +1,73 @@
+---
+title: "Quickstart"
+description: "Pair two machines with a phrase and send your first file with Hayate, then try direct mode with an address and passphrase."
+---
+
+**Prerequisites:** Hayate is [installed](/installation) on both machines, and both are on the same local network.
+
+## Send with a pairing phrase
+
+Pairing mode needs no IP addresses. The sender prints a one-time phrase, and the receiver joins with it.
+
+<Steps>
+  <Step title="Start the sender">
+    On the machine that has the file:
+
+    ```bash
+    hayate send ./photos.zip
+    ```
+
+    Hayate prints a 5-word pairing phrase and the exact command to run on the other machine, then waits.
+  </Step>
+  <Step title="Join from the receiver">
+    On the other machine, run the command the sender printed:
+
+    ```bash
+    hayate receive --code "forest-river-mango-silver-orbit"
+    ```
+
+    The receiver finds the sender on the network and shows what is being offered.
+  </Step>
+  <Step title="Accept the transfer">
+    Confirm the prompt on the receiver. The file streams encrypted and compressed, and both sides print the same checksum when it finishes, for example `blake3$…`.
+  </Step>
+</Steps>
+
+If the phrases don't match, the handshake fails authentication and the transfer aborts with [exit code 5](/cli/exit-codes).
+
+## Send to a known address
+
+When you know the receiver's address, use direct mode instead.
+
+<Steps>
+  <Step title="Start a receiver">
+    ```bash
+    hayate receive --port 50001 --output ./downloads
+    ```
+  </Step>
+  <Step title="Send to it">
+    ```bash
+    hayate send ./archive.tar.gz 192.168.1.50:50001
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Direct mode without a passphrase is not authenticated. On a network you don't fully trust, pass the same `--passphrase` on both sides, or use pairing mode.
+
+  ```bash
+  hayate receive --port 50001 --output ./downloads --passphrase "correct horse battery staple"
+  hayate send ./archive.tar.gz 192.168.1.50:50001 --passphrase "correct horse battery staple"
+  ```
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Sending and receiving" icon="arrow-left-right" href="/guides/sending-and-receiving">
+    Directories, resume, overwrite policies, bandwidth limits and saved peers.
+  </Card>
+  <Card title="Find receivers" icon="radar" href="/guides/discovery">
+    Discover receivers with mDNS, UDP and subnet sweeps.
+  </Card>
+</CardGroup>

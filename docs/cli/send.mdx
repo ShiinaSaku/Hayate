@@ -1,0 +1,79 @@
+---
+title: "hayate send"
+description: "Reference for hayate send: send a file or directory by pairing phrase, address, saved peer or LAN picker, with compression, hashing and bandwidth options."
+---
+
+```bash
+hayate send [PATH] [TARGET] [FLAGS]
+```
+
+Sends a file or directory. Without a target, Hayate prints a pairing phrase and waits for a receiver to join. Alias: `tx`.
+
+## Examples
+
+```bash
+# Pairing mode: print a phrase and wait
+hayate send ./photos.zip
+
+# Direct mode
+hayate send ./archive.tar.gz 192.168.1.50:50001
+
+# Direct mode with a shared secret
+hayate send ./archive.tar.gz 192.168.1.50:50001 --passphrase "correct horse battery staple"
+
+# Saved peer, capped at 10 MiB/s
+hayate send ./movie.mkv --to laptop --bandwidth-limit 10MiB
+
+# Choose a receiver from a LAN scan
+hayate send ./notes.md --pick
+```
+
+## Arguments
+
+<ParamField path="PATH" type="path">
+  File or directory to send. When omitted, Hayate opens an interactive picker, which needs a terminal.
+</ParamField>
+
+<ParamField path="TARGET" type="ip:port | hostname:port">
+  Receiver address. When omitted (and `--to` and `--pick` aren't set), Hayate uses pairing mode. IPv4 addresses are preferred when a hostname resolves to both.
+</ParamField>
+
+## Flags
+
+<ParamField path="--to" type="NAME">
+  Send to a [saved peer](/cli/peers-and-history#hayate-peers). Conflicts with `TARGET`.
+</ParamField>
+
+<ParamField path="--pick" type="flag">
+  Scan the LAN and choose a receiver interactively. Needs a terminal. Conflicts with `TARGET`, `--to` and `--code`.
+</ParamField>
+
+<ParamField path="--code" type="phrase">
+  Use this pairing phrase instead of generating one.
+</ParamField>
+
+<ParamField path="--passphrase" type="secret">
+  Shared secret for a direct transfer. It must match the receiver's `--passphrase`. Requires a target and conflicts with `--code`.
+</ParamField>
+
+<ParamField path="-z, --compress" type="bool" default="true">
+  Compress frames with zstd level 1 before encrypting.
+</ParamField>
+
+<ParamField path="--no-compress" type="flag">
+  Turn off compression. Same as `--compress=false`.
+</ParamField>
+
+<ParamField path="--hash" type="blake3 | sha256" default="blake3">
+  Hash algorithm for payload integrity.
+</ParamField>
+
+<ParamField path="--bandwidth-limit" type="RATE">
+  Cap sustained throughput in bytes per second. Accepts plain numbers and units such as `500KiB`, `10MiB`, `1.5MiB`, `2M` or `1GB`. Binary units (`KiB`, `MiB`, `GiB`) are powers of 1024, and decimal units (`K`, `M`, `G`, with or without `B`) are powers of 1000. Unlimited by default.
+</ParamField>
+
+<ParamField path="--no-progress" type="flag">
+  Hide the progress bar. Alias: `--no-tui`.
+</ParamField>
+
+[Global flags](/cli/overview#global-flags) also apply.

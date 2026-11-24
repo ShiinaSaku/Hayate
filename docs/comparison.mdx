@@ -1,0 +1,24 @@
+---
+title: "Comparison"
+description: "How Hayate compares with scp, rsync, Magic Wormhole, LocalSend, croc and sendme for moving files between machines."
+---
+
+| Tool | Transport | Discovery | Encryption | Server needed | Web UI |
+| --- | --- | --- | --- | --- | --- |
+| scp / rsync | TCP / SSH | Manual IP | SSH | sshd | No |
+| Magic Wormhole | TCP / TLS | Rendezvous server | PAKE | Yes (public relay) | No |
+| LocalSend | HTTP / HTTPS | mDNS | TLS | No | No |
+| croc | TCP relay | Code phrase | PAKE | Optional relay | No |
+| sendme | iroh QUIC | Ticket / iroh DNS | TLS | iroh relay fallback | No |
+| **Hayate** | **QUIC (compio)** | **mDNS + UDP query** | **X25519 + Argon2id + AEAD** | **No** | **Local dashboard** |
+
+## Hayate and sendme
+
+sendme is the closest comparison. It is built on iroh, so it can cross the internet and traverse NAT, which Hayate does not do.
+
+Hayate stays infrastructure-free and LAN-only on purpose. On a local network it avoids relay and DNS round trips, compresses payloads, and pairs with a short phrase instead of a long ticket.
+
+## When to use something else
+
+- You need to send across the internet: use a tool with relay support, such as sendme, croc or Magic Wormhole.
+- You need incremental sync of a directory tree: use rsync.

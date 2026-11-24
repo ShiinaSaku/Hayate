@@ -1,0 +1,35 @@
+---
+title: "Threat model"
+description: "What Hayate protects against on a local network, what it does not, and how to choose between pairing, passphrases and unauthenticated direct mode."
+---
+
+Hayate is built for moving files between devices you control on a local network. This page explains which attackers it defends against and where its protection ends.
+
+## What Hayate protects
+
+- **Eavesdroppers.** File contents and metadata (name and size) are encrypted with a fresh key for every transfer.
+- **Impersonation, when you use a secret.** In pairing mode, or in direct mode with `--passphrase` on both sides, only a peer that knows the secret can complete the handshake.
+- **Tampering.** Every frame carries an AEAD tag, and both sides verify a checksum over the whole payload.
+- **Malicious archives.** Directory extraction refuses paths that would escape the output directory.
+- **Browser attacks on the dashboard.** `hayate web` binds to loopback and requires a per-launch token. It also checks the `Host` header and sends a strict Content Security Policy. See [web dashboard](/guides/dashboard#security).
+
+## What Hayate does not protect
+
+<Warning>
+  **Direct mode without `--passphrase` is unauthenticated.** Anyone on the network path who can intercept QUIC traffic could pose as the receiver. On networks you don't fully trust, use pairing mode or a shared `--passphrase`.
+</Warning>
+
+- **Discovery is unauthenticated.** mDNS advertisements and UDP discovery replies are hints. Any host can send them. The handshake decides whether a transfer is trusted.
+- **Phrase stretching is not a full PAKE.** Argon2id makes offline guessing of a pairing phrase expensive for an active attacker, but it doesn't make it impossible the way a password-authenticated key exchange would. Keep phrases one-time, which is what `hayate send` generates by default.
+- **No internet traversal.** Hayate doesn't punch through NAT or use a relay. Both machines must reach each other directly.
+- **Endpoint security.** Hayate can't protect files on a compromised sender or receiver.
+
+## Choosing a mode
+
+| Situation | Use |
+| --- | --- |
+| Your own devices, no addresses handy | Pairing mode (`hayate send` and `hayate receive --code`) |
+| Known address, shared or untrusted network | Direct mode with the same `--passphrase` on both sides |
+| Known address, network you fully control | Direct mode without a passphrase |
+
+To read more about the cryptography, see [how a transfer works](/security/how-it-works).

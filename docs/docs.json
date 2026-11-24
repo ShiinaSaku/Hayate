@@ -1,0 +1,136 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "Hayate",
+  "description": "Encrypted, compressed LAN file transfer. One binary, no cloud, no accounts, no SSH.",
+  "colors": {
+    "primary": "#0071e3",
+    "light": "#0a84ff",
+    "dark": "#0071e3"
+  },
+  "background": {
+    "color": {
+      "light": "#f5f5f7",
+      "dark": "#000000"
+    }
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "/"
+  },
+  "favicon": "/favicon.svg",
+  "icons": {
+    "library": "lucide"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "crates.io",
+        "href": "https://crates.io/crates/hayate"
+      },
+      {
+        "label": "docs.rs",
+        "href": "https://docs.rs/hayate"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/ShiinaSaku/Hayate"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Using Hayate",
+            "pages": [
+              "guides/sending-and-receiving",
+              "guides/discovery",
+              "guides/dashboard",
+              "guides/scripting",
+              "guides/performance"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/how-it-works",
+              "security/threat-model"
+            ]
+          },
+          {
+            "group": "More",
+            "pages": [
+              "comparison"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/send",
+              "cli/receive",
+              "cli/discover",
+              "cli/web",
+              "cli/peers-and-history",
+              "cli/docs-and-completions"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "cli/exit-codes",
+              "cli/json-events"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Rust library",
+        "groups": [
+          {
+            "group": "Library",
+            "pages": [
+              "library/overview",
+              "library/sending",
+              "library/receiving",
+              "library/errors"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/ShiinaSaku/Hayate"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude"
+    ]
+  }
+}

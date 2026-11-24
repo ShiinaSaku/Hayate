@@ -1,0 +1,67 @@
+---
+title: "Hayate"
+sidebarTitle: "Overview"
+description: "Send files and folders between your own machines over the local network. Encrypted, compressed and verified, with no cloud, accounts or SSH."
+mode: "wide"
+---
+
+Hayate (疾風, "gale") moves files directly between devices on the same network. You run one command on each machine, and Hayate handles discovery, encryption, compression and verification.
+
+```bash
+hayate send ./photos.zip
+```
+
+```text
+   ●  Pairing code
+   forest-river-mango-silver-orbit
+
+   Receiver runs:  hayate receive --code "forest-river-mango-silver-orbit"
+```
+
+<CardGroup cols={3}>
+  <Card title="Install" icon="download" href="/installation">
+    Shell installer, npm, prebuilt archives or build from source.
+  </Card>
+  <Card title="Quickstart" icon="zap" href="/quickstart">
+    Pair two machines and send your first file in under a minute.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Every command, flag, environment variable and exit code.
+  </Card>
+  <Card title="Web dashboard" icon="layout-dashboard" href="/guides/dashboard">
+    Drag-and-drop sends, a receive listener and live history in your browser.
+  </Card>
+  <Card title="Rust library" icon="box" href="/library/overview">
+    Embed the transfer engine with `HayateSender` and `HayateReceiver`.
+  </Card>
+  <Card title="Security" icon="shield-check" href="/security/how-it-works">
+    X25519, Argon2id, HKDF and per-frame AEAD, plus what Hayate does not protect.
+  </Card>
+</CardGroup>
+
+## Why Hayate
+
+- **No infrastructure.** There is no relay, rendezvous server or SSH daemon. Two devices on the same network are enough.
+- **Authenticated by a phrase.** Hayate stretches a 5-word pairing phrase with memory-hard Argon2id and mixes it into the key exchange. Only a peer that knows the phrase can derive the session key.
+- **Fast where it counts.** Hayate uses QUIC with 4 MiB frames and asynchronous read-ahead. Compression and encryption run on dedicated worker threads.
+- **Resumable and verifiable.** Interrupted single-file transfers continue from the last frame boundary. The checksum covers the whole file, including the part received before the interruption.
+- **Inspectable.** The local dashboard shows peers and history without sending anything off your machine.
+
+## Features
+
+| Area | What you get |
+| --- | --- |
+| Transport | QUIC on [compio](https://github.com/compio-rs/compio) (io_uring, IOCP or kqueue), 4 MiB frames, 8-deep read-ahead |
+| Encryption | Ephemeral X25519, Argon2id phrase stretching, HKDF-SHA256, per-frame AES-256-GCM or ChaCha20-Poly1305 |
+| Pairing | 5-word phrases, mDNS and UDP discovery, direct `ip:port`, optional `--passphrase` |
+| Integrity | BLAKE3 (default) or SHA-256 over the plaintext, plus size and frame validation on receive |
+| Resume | Single-file transfers continue from the last 4 MiB boundary |
+| Compression | zstd level 1, skipped for compressed formats and turned off for incompressible data |
+| Control | Bandwidth limits, named peers, an interactive receiver picker and overwrite policies |
+| Dashboard | `hayate web`: drag-and-drop send, receive listener, live progress, history and token auth |
+| Scripting | NDJSON events with `schema: hayate/1`, stable exit codes, `--quiet` and `--verbose` |
+| Platforms | One static binary each for macOS, Linux and Windows. Android (Termux) builds from source. |
+
+<Frame caption="The `hayate web` dashboard: loopback-only, token-gated, with live peers and history.">
+  <img src="/images/dashboard.png" alt="Hayate web dashboard showing the send panel, nearby receivers and transfer history" />
+</Frame>
