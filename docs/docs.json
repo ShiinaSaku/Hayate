@@ -129,7 +129,8 @@
     "options": [
       "copy",
       "view"
-    ]
+    ],
+    "display": "toc"
   },
   "styling": {
     "eyebrows": "section"
