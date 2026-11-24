@@ -9,17 +9,26 @@ hayate [GLOBAL FLAGS] <COMMAND> [ARGS]
 
 ## Commands
 
-| Command | Aliases | Description |
-| --- | --- | --- |
-| [`send`](/cli/send) | `tx` | Send a file or directory to a receiver |
-| [`receive`](/cli/receive) | `recv`, `rx` | Start a receiver and wait for a transfer |
-| [`discover`](/cli/discover) | `scan` | Find receivers on the local network |
-| [`web`](/cli/web) | `dashboard` | Serve the local dashboard |
-| [`peers`](/cli/peers-and-history#hayate-peers) | `peer` | Manage named peers |
-| [`history`](/cli/peers-and-history#hayate-history) | `log` | Show recent transfers |
-| [`docs`](/cli/docs-and-completions#hayate-docs) | | Print the in-terminal guide or open this site |
-| [`completions`](/cli/docs-and-completions#hayate-completions) | | Generate or install shell completions |
-| `man` | | Print the roff man page (hidden from `--help`) |
+<CardGroup cols={2}>
+  <Card title="send" icon="send" href="/cli/send">
+    Send a file or directory. Alias: `tx`.
+  </Card>
+  <Card title="receive" icon="download" href="/cli/receive">
+    Wait for a transfer. Aliases: `recv`, `rx`.
+  </Card>
+  <Card title="discover" icon="radar" href="/cli/discover">
+    Find receivers on the network. Alias: `scan`.
+  </Card>
+  <Card title="web" icon="layout-dashboard" href="/cli/web">
+    Serve the local dashboard. Alias: `dashboard`.
+  </Card>
+  <Card title="peers and history" icon="users" href="/cli/peers-and-history">
+    Named peers (`peer`) and past transfers (`log`).
+  </Card>
+  <Card title="docs and completions" icon="book-open" href="/cli/docs-and-completions">
+    In-terminal guide, shell completions and the man page.
+  </Card>
+</CardGroup>
 
 Run `hayate <COMMAND> --help` for the built-in help.
 
@@ -57,7 +66,5 @@ These flags work with every command.
 
 ## Files
 
-| File | Location |
-| --- | --- |
-| Saved peers | `hayate/peers.json` in your config directory, for example `~/.config/hayate/peers.json` on Linux |
-| Transfer history | `hayate/history.jsonl` in your data directory, for example `~/.local/share/hayate/history.jsonl` on Linux |
+- **Saved peers:** `hayate/peers.json` in your config directory, for example `~/.config/hayate/peers.json` on Linux.
+- **Transfer history:** `hayate/history.jsonl` in your data directory, for example `~/.local/share/hayate/history.jsonl` on Linux.

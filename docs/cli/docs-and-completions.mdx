@@ -41,12 +41,10 @@ hayate completions zsh --install     # install it and print setup steps
 
 `--install` writes to these locations:
 
-| Shell | Path |
-| --- | --- |
-| bash | `~/.bash_completion.d/hayate` |
-| zsh | `~/.zsh/completions/_hayate` |
-| fish | `~/.config/fish/completions/hayate.fish` (loaded automatically) |
-| PowerShell (Windows only) | `~\Documents\PowerShell\Modules\hayate\hayate.ps1`, which you dot-source from your profile |
+- **bash:** `~/.bash_completion.d/hayate`
+- **zsh:** `~/.zsh/completions/_hayate`
+- **fish:** `~/.config/fish/completions/hayate.fish`, which fish loads automatically
+- **PowerShell (Windows only):** `hayate.ps1` under `Documents\PowerShell\Modules\hayate` in your home folder. Dot-source it from your profile.
 
 `--install` doesn't support Elvish, or PowerShell outside Windows. Print the script instead.
 

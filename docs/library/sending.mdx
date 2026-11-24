@@ -51,14 +51,29 @@ async fn run() -> Result<(), hayate::EngineError> {
 
 ## Builder options
 
-| Method | Default | Description |
-| --- | --- | --- |
-| `target(SocketAddr)` | none | Receiver address for direct mode |
-| `code(String)` | none | Pairing phrase. Also used as the passphrase unless `passphrase` is set. |
-| `passphrase(String)` | none | Secret stretched with Argon2id into the key derivation |
-| `compress(bool)` | `true` | zstd compression |
-| `hash_algo(String)` | `"blake3"` | `"blake3"` or `"sha256"` |
-| `bandwidth_limit(u64)` | unlimited | Sustained throughput cap in bytes per second |
+<ParamField path="target(SocketAddr)">
+  Receiver address for direct mode.
+</ParamField>
+
+<ParamField path="code(String)">
+  Pairing phrase. It is also used as the passphrase unless you set `passphrase`.
+</ParamField>
+
+<ParamField path="passphrase(String)">
+  Secret stretched with Argon2id into the key derivation.
+</ParamField>
+
+<ParamField path="compress(bool)" default="true">
+  zstd compression.
+</ParamField>
+
+<ParamField path="hash_algo(String)" default="blake3">
+  `"blake3"` or `"sha256"`.
+</ParamField>
+
+<ParamField path="bandwidth_limit(u64)" default="unlimited">
+  Sustained throughput cap in bytes per second.
+</ParamField>
 
 ## Progress
 
@@ -99,15 +114,13 @@ async fn run() -> Result<(), hayate::EngineError> {
 
 A sender reports these `TransferStage` variants:
 
-| Stage | Meaning |
-| --- | --- |
-| `Connecting { peer }` | Dialing a known receiver |
-| `Pairing { code }` | Broadcasting the phrase and waiting for a receiver |
-| `Connected { peer }` | QUIC connection established |
-| `Handshaking` | Version, cipher and key exchange in progress |
-| `Ready { meta, cipher_id, peer, total_size }` | Handshake done, payload about to start |
-| `Resuming { offset }` | The receiver asked to continue from a byte offset |
-| `Transferring { filename, total_size }` | Payload is flowing |
-| `Finishing` | Streams are being drained |
+- `Connecting { peer }`: dialing a known receiver.
+- `Pairing { code }`: broadcasting the phrase and waiting for a receiver.
+- `Connected { peer }`: the QUIC connection is open.
+- `Handshaking`: version, cipher and key exchange are in progress.
+- `Ready { meta, cipher_id, peer, total_size }`: the handshake is done and the payload is about to start.
+- `Resuming { offset }`: the receiver asked to continue from a byte offset.
+- `Transferring { filename, total_size }`: the payload is flowing.
+- `Finishing`: streams are being drained.
 
 `TransferStage` is `#[non_exhaustive]`, so always include a wildcard arm.

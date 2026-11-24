@@ -60,13 +60,25 @@ async fn run() -> Result<(), hayate::EngineError> {
 
 ## Builder options
 
-| Method | Default | Description |
-| --- | --- | --- |
-| `bind(SocketAddr)` | `0.0.0.0:50001` | Local address for direct mode |
-| `code(String)` | none | Pairing phrase. Also used as the passphrase unless `passphrase` is set. |
-| `passphrase(String)` | none | Secret for direct mode. Must match the sender's passphrase. |
-| `auto_accept(bool)` | `false` | Accept every transfer without calling the consent callback |
-| `resume(bool)` | `false` | Continue interrupted single-file transfers from an existing partial file |
+<ParamField path="bind(SocketAddr)" default="0.0.0.0:50001">
+  Local address for direct mode.
+</ParamField>
+
+<ParamField path="code(String)">
+  Pairing phrase. It is also used as the passphrase unless you set `passphrase`.
+</ParamField>
+
+<ParamField path="passphrase(String)">
+  Secret for direct mode. It must match the sender's passphrase.
+</ParamField>
+
+<ParamField path="auto_accept(bool)" default="false">
+  Accept every transfer without calling the consent callback.
+</ParamField>
+
+<ParamField path="resume(bool)" default="false">
+  Continue interrupted single-file transfers from an existing partial file.
+</ParamField>
 
 ## Choose the destination
 

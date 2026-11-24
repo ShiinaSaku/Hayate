@@ -5,11 +5,14 @@ description: "How Hayate's transfer pipeline keeps disks and networks busy, how 
 
 Hayate splits a transfer into stages that run in parallel, so reading, hashing, compressing, encrypting and sending overlap.
 
-```text
-Disk → [8 async reads × 4 MiB] → [hasher thread] → [workers: zstd + AEAD] → [QUIC window] → Wire
-                                                                                  ↓
-                                    receiver: decrypt → reorder → hash → sequential write
-```
+On the sender, data flows through these stages:
+
+1. Up to eight async reads of 4 MiB each.
+2. A dedicated hasher thread.
+3. Worker threads that compress with zstd and encrypt with AEAD.
+4. The QUIC flow-control window, then the network.
+
+On the receiver, frames are decrypted, put back in order, hashed and written sequentially.
 
 ## Pipeline
 

@@ -46,16 +46,14 @@ A receiver joins with the same phrase, either from the CLI (`hayate receive --co
 
 The stable surface is the `runner` module and the types re-exported at the crate root:
 
-| Item | Purpose |
-| --- | --- |
-| `HayateSender` | Builder that sends a file or directory. See [sending](/library/sending). |
-| `HayateReceiver` | Builder that receives one transfer, or binds a listener. See [receiving](/library/receiving). |
-| `ListeningReceiver` | Bound listener that accepts several direct transfers in sequence |
-| `TransferStage` | Lifecycle events reported by the staged APIs |
-| `SendOutcome`, `ReceiveOutcome` | Results of staged transfers |
-| `Metadata`, `TransferKind` | What is being transferred: name, size and file or directory |
-| `EngineError` | Every failure the engine reports. See [errors](/library/errors). |
-| `DiscoveredPeer`, `BroadcasterGuard` | Discovery types |
+- `HayateSender`: builder that sends a file or directory. See [sending](/library/sending).
+- `HayateReceiver`: builder that receives one transfer or binds a listener. See [receiving](/library/receiving).
+- `ListeningReceiver`: a bound listener that accepts several direct transfers in sequence.
+- `TransferStage`: lifecycle events reported by the staged APIs.
+- `SendOutcome` and `ReceiveOutcome`: results of staged transfers.
+- `Metadata` and `TransferKind`: what is being transferred (name, size, and file or directory).
+- `EngineError`: every failure the engine reports. See [errors](/library/errors).
+- `DiscoveredPeer` and `BroadcasterGuard`: discovery types.
 
 The `protocol`, `crypto`, `network`, `discovery` and `local_addr` modules are public too. Modules hidden from the documentation are internals: they may change in any release and aren't covered by semver.
 
