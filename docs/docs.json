@@ -29,6 +29,10 @@
   "navbar": {
     "links": [
       {
+        "label": "Docs",
+        "href": "/quickstart"
+      },
+      {
         "label": "crates.io",
         "href": "https://crates.io/crates/hayate"
       },
@@ -50,7 +54,6 @@
           {
             "group": "Get started",
             "pages": [
-              "index",
               "installation",
               "quickstart"
             ]
