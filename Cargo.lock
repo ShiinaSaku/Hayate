@@ -1051,7 +1051,7 @@ checksum = "735eaa21a6a5ffb2e84362faaeb90c05ba8e19797ca30428478cb6ea3a4921bc"
 
 [[package]]
 name = "hayate"
-version = "6.1.0"
+version = "7.0.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "hayate-cli"
-version = "6.1.0"
+version = "7.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
