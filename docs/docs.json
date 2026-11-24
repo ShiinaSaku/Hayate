@@ -133,7 +133,7 @@
     "display": "toc"
   },
   "styling": {
-    "eyebrows": "section",
+    "eyebrows": "breadcrumbs",
     "codeblocks": {
       "theme": {
         "light": "vitesse-light",
