@@ -133,6 +133,11 @@ fn make_consent(
     move |meta, peer| {
         let dest = if auto_accept {
             Some(resolve_output(&output_dir, meta))
+        } else if !output::stdin_is_tty() {
+            *prompt_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(anyhow::anyhow!(
+                "cannot ask for consent without a terminal; pass --auto-accept"
+            ));
+            return None;
         } else {
             match output::suspend_for_prompt(|| prompt_accept(meta, peer, &output_dir)) {
                 Ok(path) => path,
@@ -173,7 +178,7 @@ fn confirm_overwrite(dest: &Path, policy: OverwritePolicy, can_resume: bool) -> 
     if policy == OverwritePolicy::Allow || can_resume || !dest.exists() {
         return Ok(true);
     }
-    if policy == OverwritePolicy::Deny || !output::is_tty() {
+    if policy == OverwritePolicy::Deny || !output::stdin_is_tty() {
         output::warn(&format!(
             "{} already exists; pass --overwrite to replace it or --resume to continue a partial transfer",
             dest.display()
@@ -301,7 +306,10 @@ async fn run_listen(args: ReceiveArgs, cancelled: Arc<AtomicBool>) -> Result<()>
     let bind_addr = SocketAddr::new(args.bind, args.port);
     // See the note in `run_pairing`: the consent callback owns auto-accept so
     // the overwrite policy is always applied.
-    let builder = HayateReceiver::new().bind(bind_addr).resume(args.resume);
+    let mut builder = HayateReceiver::new().bind(bind_addr).resume(args.resume);
+    if let Some(passphrase) = args.passphrase.clone() {
+        builder = builder.passphrase(passphrase);
+    }
     let listener = builder.listen().await.context("Failed to bind listener")?;
     let local_addr = listener.local_addr()?;
     let local_port = local_addr.port();

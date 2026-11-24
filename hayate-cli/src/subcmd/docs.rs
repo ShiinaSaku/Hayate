@@ -92,12 +92,13 @@ fn section_quick_start() {
 fn section_send() {
     heading("hayate send [PATH] [TARGET]");
     body("Omit TARGET to print a pairing code and wait for a receiver.");
-    body("Pass ip:port for a direct connection. Optional --code is a passphrase.");
+    body("Pass ip:port for a direct connection. Optional --passphrase authenticates it.");
     kv("PATH", "file or directory to send (omit for an interactive prompt)");
     kv("TARGET", "receiver ip:port (optional)");
     kv("--to NAME", "dial a saved peer (see hayate peers)");
     kv("--pick", "scan the LAN and choose a receiver interactively");
-    kv("--code", "pairing phrase / passphrase");
+    kv("--code", "pairing phrase");
+    kv("--passphrase", "direct-mode secret");
     kv("-z / --compress", "zstd on (default)");
     kv("--no-compress", "disable compression");
     kv("--hash", "blake3 | sha256");
@@ -109,6 +110,7 @@ fn section_send() {
     code("hayate send ./blob.bin 10.0.0.5:50001 --no-compress --format json");
     code("hayate send ./movie.mkv --to laptop --bandwidth-limit 50MiB");
     code("hayate send ./photo.jpg --pick");
+    code("hayate send ./blob.bin 10.0.0.5:50001 --passphrase \"shared secret\"");
     println!();
 }
 
@@ -120,6 +122,7 @@ fn section_receive() {
     kv("-p / --port", "listen port (HAYATE_PORT, default 50001)");
     kv("-o / --output", "save directory (default .)");
     kv("--code", "join pairing session");
+    kv("--passphrase", "authenticate direct sender");
     kv("--auto-accept", "skip confirm prompt");
     kv("--resume", "continue interrupted single-file transfers");
     kv("--once", "exit after the first completed transfer");
@@ -236,8 +239,8 @@ fn section_environment() {
 
 fn section_security() {
     heading("Security (short)");
-    body("X25519 ECDH + HKDF-SHA256 + AEAD frames (AES-GCM or ChaCha20).");
-    body("Pairing phrase authenticates the session key (not a full PAKE).");
+    body("X25519 ECDH + Argon2id-stretched phrase + HKDF-SHA256 + AEAD frames.");
+    body("Phrase stretching slows offline guessing, but is not a full PAKE.");
     body("Tar extract rejects absolute paths, .., and symlinks.");
     body("Discovery is unauthenticated; the handshake is the trust boundary.");
     println!();

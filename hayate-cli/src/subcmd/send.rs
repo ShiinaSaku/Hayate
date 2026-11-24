@@ -34,6 +34,10 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
         args.target.clone()
     };
 
+    if target_str.is_none() && args.passphrase.is_some() {
+        bail!("--passphrase requires a target; use --code for pairing");
+    }
+
     let compress = args.compress && !args.no_compress;
     let hash_algo = args.hash.as_str().to_owned();
 
@@ -61,9 +65,10 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
     if let Some(target_str) = &target_str {
         let target_addr = resolve_target(target_str)?;
         builder = builder.target(target_addr);
-        // Optional out-of-band secret on a direct transfer.
-        if let Some(code) = phrase {
-            builder = builder.passphrase(code);
+        // Optional out-of-band secret on a direct transfer. --passphrase
+        // wins over a legacy --code used with a target.
+        if let Some(secret) = args.passphrase.clone().or_else(|| phrase.clone()) {
+            builder = builder.passphrase(secret);
         }
     } else {
         let phrase = phrase.expect("pairing mode always has a phrase");
@@ -200,7 +205,7 @@ pub async fn run(args: SendArgs, cancelled: Arc<AtomicBool>) -> Result<()> {
 
 /// Interactive LAN scan + receiver selection for `--pick`.
 async fn pick_peer(cancelled: &Arc<AtomicBool>) -> Result<String> {
-    if !output::is_tty() {
+    if !output::stdin_is_tty() {
         bail!("--pick requires an interactive terminal (no TTY detected)");
     }
     let mut found = crate::subcmd::discover::fast_discover(std::time::Duration::from_secs(2)).await;
@@ -272,7 +277,7 @@ fn resolve_target(raw: &str) -> Result<SocketAddr> {
 
 /// Interactive path prompt for `hayate send` with no positional path.
 fn prompt_path() -> Result<PathBuf> {
-    if !output::is_tty() {
+    if !output::stdin_is_tty() {
         bail!("no path given and no TTY for the interactive picker");
     }
     let answer = output::suspend_for_prompt(|| {

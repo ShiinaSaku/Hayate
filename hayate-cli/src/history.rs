@@ -119,7 +119,7 @@ pub fn recent(limit: usize) -> Result<Vec<HistoryEntry>> {
 pub fn run(args: HistoryArgs) -> Result<()> {
     if args.clear {
         if !args.yes {
-            if !output::is_tty() {
+            if !output::stdin_is_tty() {
                 anyhow::bail!("refusing to clear history without --yes (no TTY to confirm)");
             }
             let confirmed = output::suspend_for_prompt(|| {

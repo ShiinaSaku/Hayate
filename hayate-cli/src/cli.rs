@@ -8,8 +8,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 pub fn cli_styles() -> Styles {
     Styles::styled()
-        .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
-        .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .header(AnsiColor::Blue.on_default().effects(Effects::BOLD))
+        .usage(AnsiColor::Blue.on_default().effects(Effects::BOLD))
         .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
         .placeholder(AnsiColor::Yellow.on_default())
 }
@@ -72,6 +72,7 @@ Examples:
   hayate receive --output ./downloads
   hayate receive --once --resume
   hayate send ./photo.jpg 192.168.1.20:50001
+  hayate send ./archive.tar.gz 192.168.1.20:50001 --passphrase \"shared secret\"
   hayate send ./project --code alpha-bravo-charlie-delta
   hayate send ./big.iso --to laptop --bandwidth-limit 50MiB
   hayate send ./photo.jpg --pick
@@ -137,7 +138,7 @@ pub enum Command {
     )]
     Discover(DiscoverArgs),
 
-    /// Open the local dashboard in the browser.
+    /// Serve the local dashboard.
     #[command(
         alias = "dashboard",
         long_about = "Serve a loopback-only dashboard: drag-and-drop send, a receive listener,\n\
@@ -211,6 +212,10 @@ pub struct ReceiveArgs {
     #[arg(long)]
     pub code: Option<String>,
 
+    /// Passphrase for a direct listener (must match the sender's --passphrase).
+    #[arg(long, conflicts_with = "code")]
+    pub passphrase: Option<String>,
+
     /// Resume interrupted single-file transfers from existing partial files.
     #[arg(long)]
     pub resume: bool,
@@ -247,6 +252,11 @@ pub struct SendArgs {
     /// Cryptographic code-phrase for pairing.
     #[arg(long)]
     pub code: Option<String>,
+
+    /// Passphrase for a direct transfer (must match the receiver's
+    /// --passphrase).
+    #[arg(long, conflicts_with = "code")]
+    pub passphrase: Option<String>,
 
     /// Compress chunks with zstd level 1 before encrypting (default on).
     #[arg(

@@ -153,6 +153,10 @@ thread_local! {
     ///
     /// MultiProgress defaults to stderr, so we use stderr TTY status as the gate.
     static IS_TTY: bool = std::io::stderr().is_terminal();
+
+    /// Whether stdin is a true terminal. Interactive prompts must use this,
+    /// not stderr: redirecting logs to a file should not disable the picker.
+    static STDIN_IS_TTY: bool = std::io::stdin().is_terminal();
 }
 
 fn detect_unicode_capable() -> bool {
@@ -175,6 +179,12 @@ fn detect_unicode_capable() -> bool {
 #[inline]
 pub fn is_tty() -> bool {
     IS_TTY.with(|v| *v)
+}
+
+/// Returns `true` when stdin is a real terminal.
+#[inline]
+pub fn stdin_is_tty() -> bool {
+    STDIN_IS_TTY.with(|v| *v)
 }
 
 /// Returns `true` when the terminal supports Unicode box-drawing glyphs.
@@ -245,7 +255,7 @@ fn icon_dot() -> &'static str {
 }
 fn icon_lock() -> &'static str {
     // No emoji — geometric mark only.
-    "#"
+    if unicode_capable() { "◆" } else { "*" }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,18 +419,18 @@ pub fn print_banner() {
     if width >= 54 {
         println!(
             "   {}  {}  {}",
-            style(mark).bold().green(),
-            style("hayate").bold().white(),
+            style(mark).bold().blue(),
+            style("Hayate").bold().white(),
             style(format!("v{VERSION}")).dim()
         );
-        println!("        {}", style("encrypted LAN transfer over QUIC").dim());
+        println!("        {}", style("encrypted LAN transfer").dim());
         let bar_w = width.saturating_sub(8).clamp(32, 64);
         println!("   {}", style(rule.repeat(bar_w)).dim());
     } else {
         println!(
             "   {}  {}  {}",
-            style(mark).bold().green(),
-            style("hayate").bold().white(),
+            style(mark).bold().blue(),
+            style("Hayate").bold().white(),
             style(format!("v{VERSION}")).dim()
         );
         println!("        {}", style("encrypted LAN transfer").dim());

@@ -123,7 +123,7 @@ mod tests {
             CliExitCode::TransferRejected
         );
         assert_eq!(
-            CliExitCode::from_engine(&EngineError::ProtocolMismatch { local: 6, remote: 5 }),
+            CliExitCode::from_engine(&EngineError::ProtocolMismatch { local: 8, remote: 5 }),
             CliExitCode::ProtocolMismatch
         );
         assert_eq!(

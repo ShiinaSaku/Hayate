@@ -335,7 +335,7 @@ async fn probe_one_with_rtt(addr: SocketAddr, timeout: Duration) -> Option<Probe
     let start = Instant::now();
     let result = compio::time::timeout(timeout, async move {
         let client_cfg = hayate::network::client_config().ok()?;
-        let endpoint = hayate::network::bind_client_for(addr).await.ok()?;
+        let endpoint = hayate::network::bind_client_for(addr).ok()?;
         let conn = endpoint.connect(addr, "hayate.local", Some(client_cfg)).ok()?.await.ok()?;
         conn.close(0u32.into(), b"discover");
         let elapsed = start.elapsed();
