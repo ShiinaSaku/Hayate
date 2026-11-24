@@ -22,7 +22,7 @@ static SERVER_CFG: OnceLock<ServerConfig> = OnceLock::new();
 static CLIENT_CFG: OnceLock<ClientConfig> = OnceLock::new();
 
 /// Generates an ephemeral self-signed TLS cert + key.
-pub fn generate_self_signed()
+fn generate_self_signed()
 -> Result<(Vec<CertificateDer<'static>>, rustls::pki_types::PrivateKeyDer<'static>), EngineError> {
     let key_pair = KeyPair::generate().map_err(|e| EngineError::Handshake(e.to_string()))?;
     let params = rcgen::CertificateParams::new(vec!["hayate.local".to_owned()])
@@ -36,7 +36,7 @@ pub fn generate_self_signed()
 }
 
 /// Helper to construct OS-aware Quinn TransportConfig.
-pub fn build_transport_config() -> Arc<quinn_proto::TransportConfig> {
+fn build_transport_config() -> Arc<quinn_proto::TransportConfig> {
     let mut config = quinn_proto::TransportConfig::default();
 
     // 1. Congestion Control
@@ -96,7 +96,7 @@ pub fn build_transport_config() -> Arc<quinn_proto::TransportConfig> {
 ///
 /// The config is built once and cached. Certificate generation or config
 /// assembly errors are propagated as [`EngineError`] rather than panicking.
-pub fn server_config() -> Result<ServerConfig, EngineError> {
+pub(crate) fn server_config() -> Result<ServerConfig, EngineError> {
     if let Some(cfg) = SERVER_CFG.get() {
         return Ok(cfg.clone());
     }
@@ -148,8 +148,7 @@ fn build_client_config() -> Result<ClientConfig, EngineError> {
 }
 
 /// Creates a QUIC listener endpoint bound to `addr`.
-#[allow(clippy::unused_async)]
-pub async fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
+pub fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
     let cfg = server_config()?;
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
@@ -185,23 +184,13 @@ pub async fn bind_server(addr: SocketAddr) -> Result<Endpoint, EngineError> {
     Ok(endpoint)
 }
 
-/// Creates a QUIC client endpoint bound to an ephemeral IPv4 local port.
-///
-/// Prefer [`bind_client_for`] when the remote address is known: an IPv4-only
-/// socket cannot reach an IPv6 peer.
-#[allow(clippy::unused_async)]
-pub async fn bind_client() -> Result<Endpoint, EngineError> {
-    bind_client_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).await
-}
-
 /// Creates a QUIC client endpoint whose local socket matches the address
 /// family of `remote`.
 ///
 /// Binding `0.0.0.0:0` and dialing `[::1]:50001` fails with
 /// "invalid remote address" on every platform, so the local wildcard must
 /// follow the remote family.
-#[allow(clippy::unused_async)]
-pub async fn bind_client_for(remote: SocketAddr) -> Result<Endpoint, EngineError> {
+pub fn bind_client_for(remote: SocketAddr) -> Result<Endpoint, EngineError> {
     let cfg = client_config()?;
     let bind_addr = if remote.is_ipv6() {
         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)

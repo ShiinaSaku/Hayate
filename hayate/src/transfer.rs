@@ -13,7 +13,7 @@ use std::io;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use compio::buf::{IntoInner, IoBuf};
 use compio::io::{AsyncReadAt, AsyncReadExt, AsyncWriteAtExt, AsyncWriteExt};
@@ -30,9 +30,16 @@ use crate::protocol::{
 };
 use crate::{EngineError, crypto};
 
-/// Oldest wire protocol version a receiver will still accept. v6 lacks the
-/// resume offset; the receiver adapts by never writing one to a v6 peer.
-const MIN_SUPPORTED_VERSION: u16 = 6;
+/// Oldest wire protocol version a receiver will still accept.
+///
+/// v8 introduced the Argon2id passphrase KDF and the mandatory resume offset.
+/// Older peers would derive a different key, so they are rejected up front.
+const MIN_SUPPORTED_VERSION: u16 = 8;
+
+/// Plaintext handshake reject byte: the receiver could not authenticate the
+/// metadata (normally a wrong passphrase). Sent before closing so the sender
+/// fails immediately instead of waiting for the QUIC idle timeout.
+const HANDSHAKE_REJECT_AUTH: u8 = 0xff;
 
 /// How long the receiver waits for the next payload frame before giving up.
 ///
@@ -47,6 +54,38 @@ pub struct ReceiveStats {
     pub checksum: String,
     /// True when at least one frame arrived zstd-compressed.
     pub compressed: bool,
+}
+
+/// A chunk read from the payload source, before it is hashed.
+///
+/// The reader thread hands ownership to a dedicated hasher thread, which
+/// forwards normal chunks to the compression/encryption workers and releases
+/// resume-prefix buffers back to the pool.
+struct RawChunk {
+    index: usize,
+    buf: Vec<u8>,
+    len: usize,
+    pooled: bool,
+    forward: bool,
+}
+
+/// Sends a raw chunk to the hasher, recovering the buffer if the receiver
+/// exited so the pool's lease/release invariant stays intact.
+async fn send_raw_chunk(
+    tx: &flume::Sender<Result<RawChunk, io::Error>>,
+    pool: &crate::pool::BufferPool,
+    raw: RawChunk,
+) -> bool {
+    let pooled = raw.pooled;
+    match tx.send_async(Ok(raw)).await {
+        Ok(()) => true,
+        Err(err) => {
+            if pooled && let Ok(raw) = err.into_inner() {
+                pool.release(raw.buf);
+            }
+            false
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +280,7 @@ where
     match consent[0] {
         0x01 => Ok((key, selected_cipher)),
         0x00 => Err(EngineError::TransferRejected),
+        HANDSHAKE_REJECT_AUTH => Err(EngineError::InvalidPassphrase),
         other => Err(EngineError::InvalidFrame(format!("unexpected consent byte 0x{other:02x}"))),
     }
 }
@@ -252,11 +292,8 @@ where
 /// This is particularly useful for protocols like QUIC that split connections
 /// into separate unidirectional streams.
 ///
-/// Returns the session key, cipher, metadata, and the peer's protocol version.
-/// A v6 sender is accepted (it never expects a resume offset); anything older
-/// or newer fails with [`EngineError::ProtocolMismatch`]. Note the asymmetry:
-/// a v7 *sender* still requires a v7 receiver, because the sender reads the
-/// resume offset the v6 receiver never sends.
+/// Returns the session key, cipher, and metadata. Peers older or newer than
+/// the current wire version fail with [`EngineError::ProtocolMismatch`].
 ///
 /// # Errors
 ///
@@ -266,7 +303,7 @@ pub async fn handshake_receiver_split<W, R>(
     send: &mut W,
     recv: &mut R,
     passphrase: Option<&str>,
-) -> Result<(([u8; 32], u8), Metadata, u16), EngineError>
+) -> Result<(([u8; 32], u8), Metadata), EngineError>
 where
     W: compio::io::AsyncWrite + Unpin,
     R: compio::io::AsyncRead + Unpin,
@@ -322,6 +359,10 @@ where
     let plain = match crypto::decrypt_metadata(&key, selected_cipher, &enc) {
         Ok(p) => p,
         Err(e) => {
+            // Tell the sender why before closing. This is a plaintext byte;
+            // it reveals only that authentication failed, which the sender
+            // already knows from its own key material.
+            let _ = write_all_owned(send, vec![HANDSHAKE_REJECT_AUTH]).await;
             if passphrase.is_some() {
                 return Err(EngineError::InvalidPassphrase);
             }
@@ -329,7 +370,7 @@ where
         },
     };
     let meta = Metadata::decode(&plain)?;
-    Ok(((key, selected_cipher), meta, remote_ver))
+    Ok(((key, selected_cipher), meta))
 }
 
 /// Writes the consent byte (0x01 = accept, 0x00 = reject).
@@ -343,7 +384,7 @@ where
 /// Writes the receiver's resume offset after an accept consent byte.
 ///
 /// `0` means a fresh transfer; any other value is a byte offset, aligned down
-/// to a [`CHUNK_SIZE`] boundary, from which the sender should continue a file
+/// to a `CHUNK_SIZE` boundary, from which the sender should continue a file
 /// payload. Directory streams always use `0`.
 pub async fn write_resume_offset<S>(stream: &mut S, offset: u64) -> Result<(), EngineError>
 where
@@ -367,7 +408,7 @@ where
 
 /// Encrypts and transmits a payload source (file or channel) to the receiver.
 ///
-/// Chunks of [`crate::protocol::CHUNK_SIZE`] are read from the source,
+/// Chunks of `CHUNK_SIZE` are read from the source,
 /// compressed (if requested and the file extension suggests it is beneficial),
 /// encrypted with the negotiated AEAD cipher, and written to the stream.
 ///
@@ -424,18 +465,60 @@ where
     let pool = crate::pool::BufferPool::new(32, CHUNK_SIZE);
     let enc_pool = crate::pool::BufferPool::new(32, CHUNK_SIZE + 1024);
 
+    // Adaptive compression: sample the first few MiB and stop paying zstd CPU
+    // if the payload is effectively incompressible. The per-frame flag still
+    // tells the receiver which frames are compressed, so this is transparent.
+    let compress_enabled = Arc::new(AtomicBool::new(do_compress));
+    let compress_input = Arc::new(AtomicU64::new(0));
+    let compress_output = Arc::new(AtomicU64::new(0));
+
+    let (raw_tx, raw_rx) = flume::bounded::<Result<RawChunk, io::Error>>(16);
     let (chunk_tx, chunk_rx) =
         flume::bounded::<Result<(usize, Vec<u8>, usize, bool), io::Error>>(16);
     let (hash_tx, hash_rx) = flume::bounded::<String>(1);
 
+    // Hasher thread: BLAKE3/SHA-256 over a 4 MiB chunk takes milliseconds.
+    // Doing it on the compio executor stalls completion processing for every
+    // read; this thread keeps hashing completely off the I/O reactor.
+    let hasher_pool = pool.clone();
+    let hasher_algo = hash_algo.to_owned();
+    let hasher_chunk_tx = chunk_tx.clone();
+    std::thread::spawn(move || {
+        let mut hasher = PayloadHasher::new(&hasher_algo)
+            .expect("hash algorithm is validated before payload transfer");
+        while let Ok(res) = raw_rx.recv() {
+            match res {
+                Ok(raw) => {
+                    hasher.update(&raw.buf[..raw.len]);
+                    if raw.forward {
+                        let item = (raw.index, raw.buf, raw.len, raw.pooled);
+                        if let Err(err) = hasher_chunk_tx.send(Ok(item)) {
+                            if let Ok((_, buf, _, pooled)) = err.into_inner()
+                                && pooled
+                            {
+                                hasher_pool.release(buf);
+                            }
+                            break;
+                        }
+                    } else if raw.pooled {
+                        hasher_pool.release(raw.buf);
+                    }
+                },
+                Err(e) => {
+                    let _ = hasher_chunk_tx.send(Err(e));
+                    break;
+                },
+            }
+        }
+        let hash = hasher.finalize(&hasher_algo);
+        let _ = hash_tx.send(hash);
+    });
+
     // Reader task: keep a small read-ahead queue so disk latency overlaps with
-    // compression/encryption without allowing unbounded memory growth.
+    // hashing, compression, and encryption without unbounded memory growth.
     let pool_clone = pool.clone();
-    let algo = hash_algo.to_owned();
     compio::runtime::spawn(async move {
         let mut index = 0;
-        let mut hasher =
-            PayloadHasher::new(&algo).expect("hash algorithm is validated before payload transfer");
 
         match source {
             PayloadSource::File { file, pos } => {
@@ -455,13 +538,21 @@ where
                                     pool_clone.release(buf);
                                     break;
                                 }
-                                hasher.update(&buf[..std::cmp::min(n, want)]);
-                                pool_clone.release(buf);
+                                let len = std::cmp::min(n, want);
+                                if !send_raw_chunk(
+                                    &raw_tx,
+                                    &pool_clone,
+                                    RawChunk { index: 0, buf, len, pooled: true, forward: false },
+                                )
+                                .await
+                                {
+                                    return;
+                                }
                                 prefix_pos += n as u64;
                             },
                             Err(e) => {
                                 pool_clone.release(buf);
-                                let _ = chunk_tx.send_async(Err(e)).await;
+                                let _ = raw_tx.send_async(Err(e)).await;
                                 return;
                             },
                         }
@@ -498,16 +589,21 @@ where
                             if n < CHUNK_SIZE {
                                 file_ended = true;
                             }
-                            hasher.update(&buf[..n]);
 
-                            if chunk_tx.send_async(Ok((index, buf, n, true))).await.is_err() {
+                            if !send_raw_chunk(
+                                &raw_tx,
+                                &pool_clone,
+                                RawChunk { index, buf, len: n, pooled: true, forward: true },
+                            )
+                            .await
+                            {
                                 break;
                             }
                             index += 1;
                         },
                         Err(e) => {
                             pool_clone.release(buf);
-                            let _ = chunk_tx.send_async(Err(e)).await;
+                            let _ = raw_tx.send_async(Err(e)).await;
                             break;
                         },
                     }
@@ -535,24 +631,26 @@ where
                             if data.is_empty() {
                                 break;
                             }
-                            hasher.update(&data);
                             let len = data.len();
-                            if chunk_tx.send_async(Ok((index, data, len, false))).await.is_err() {
+                            if !send_raw_chunk(
+                                &raw_tx,
+                                &pool_clone,
+                                RawChunk { index, buf: data, len, pooled: false, forward: true },
+                            )
+                            .await
+                            {
                                 break;
                             }
                             index += 1;
                         },
                         Err(e) => {
-                            let _ = chunk_tx.send_async(Err(e)).await;
+                            let _ = raw_tx.send_async(Err(e)).await;
                             break;
                         },
                     }
                 }
             },
         }
-
-        let hash = hasher.finalize(&algo);
-        let _ = hash_tx.send(hash);
     })
     .detach();
 
@@ -564,14 +662,27 @@ where
         .saturating_sub(1)
         .max(2);
 
-    let (result_tx, result_rx) = flume::unbounded::<Result<(usize, Vec<u8>, usize), EngineError>>();
+    // Bounded: a fast CPU pool must not outrun the network writer and turn
+    // the whole file into queued 4 MiB buffers in RAM. The writer is the
+    // consumer, so this is the pipeline's memory ceiling.
+    let (result_tx, result_rx) =
+        flume::bounded::<Result<(usize, Vec<u8>, usize), EngineError>>(num_workers * 4);
 
-    for _ in 0..num_workers {
+    for worker_index in 0..num_workers {
         let chunk_rx = chunk_rx.clone();
         let result_tx = result_tx.clone();
         let key = *key;
         let pool = pool.clone();
         let enc_pool = enc_pool.clone();
+        let compress_enabled = Arc::clone(&compress_enabled);
+        let compress_input = Arc::clone(&compress_input);
+        let compress_output = Arc::clone(&compress_output);
+        // Each worker owns a disjoint 32-bit nonce prefix and a 64-bit frame
+        // counter. The transfer key is fresh per session, so no two workers
+        // can ever emit the same nonce — no CSPRNG call in the frame loop.
+        let mut nonce = [0u8; crypto::NONCE_LEN];
+        nonce[..4].copy_from_slice(&(worker_index as u32).to_be_bytes());
+        let mut nonce_counter: u64 = 0;
         std::thread::spawn(move || {
             let aead_key = match crypto::AeadKey::new(&key, cipher_id) {
                 Ok(key) => key,
@@ -614,18 +725,33 @@ where
                 let chunk_data = &chunk[..chunk_len];
                 plain_buf.clear();
 
-                if let (Some(compressor), Some(scratch)) =
-                    (compressor.as_mut(), compress_scratch.as_mut())
+                if compress_enabled.load(Ordering::Relaxed)
+                    && let (Some(compressor), Some(scratch)) =
+                        (compressor.as_mut(), compress_scratch.as_mut())
                 {
                     match compressor.compress_to_buffer(chunk_data, scratch) {
-                        Ok(n) if n < chunk_len => {
-                            plain_buf.push(FRAME_ZSTD);
-                            plain_buf.extend_from_slice(&scratch[..n]);
-                        },
-                        Ok(_) => {
-                            // Compression didn't help this chunk; send it raw.
-                            plain_buf.push(FRAME_RAW);
-                            plain_buf.extend_from_slice(chunk_data);
+                        Ok(n) => {
+                            let input = u64::try_from(chunk_len).unwrap_or(u64::MAX);
+                            let output = u64::try_from(n).unwrap_or(u64::MAX);
+                            let total_in =
+                                compress_input.fetch_add(input, Ordering::Relaxed) + input;
+                            let total_out =
+                                compress_output.fetch_add(output, Ordering::Relaxed) + output;
+                            // After 16 MiB, if zstd saved less than 1%, stop.
+                            if total_in >= 16 * 1024 * 1024
+                                && total_out.saturating_mul(100) >= total_in.saturating_mul(99)
+                            {
+                                compress_enabled.store(false, Ordering::Relaxed);
+                            }
+                            if n < chunk_len {
+                                plain_buf.push(FRAME_ZSTD);
+                                plain_buf.extend_from_slice(&scratch[..n]);
+                            } else {
+                                // Compression didn't help this chunk; send it
+                                // raw.
+                                plain_buf.push(FRAME_RAW);
+                                plain_buf.extend_from_slice(chunk_data);
+                            }
                         },
                         Err(e) => {
                             let _ = result_tx.send(Err(EngineError::Compression(e.to_string())));
@@ -640,10 +766,13 @@ where
                     pool.release(chunk);
                 }
 
+                nonce[4..].copy_from_slice(&nonce_counter.to_be_bytes());
+                nonce_counter = nonce_counter.wrapping_add(1);
                 let mut enc_buf = enc_pool.lease_sync();
                 enc_buf.clear();
                 enc_buf.extend_from_slice(&[0u8; 4]); // placeholder for length
-                match crypto::encrypt_frame_with_key(&aead_key, &plain_buf, &mut enc_buf) {
+                match crypto::encrypt_frame_with_nonce(&aead_key, &nonce, &plain_buf, &mut enc_buf)
+                {
                     Ok(_) => {
                         let len = (enc_buf.len() - 4) as u32;
                         enc_buf[0..4].copy_from_slice(&len.to_be_bytes());
@@ -659,7 +788,9 @@ where
             }
         });
     }
-    // Drop our handle to result_tx so result_rx completes when all workers exit
+    // Drop our handle to chunk_tx so workers see EOF after the hasher exits,
+    // then drop result_tx so the writer's result_rx completes when they exit.
+    drop(chunk_tx);
     drop(result_tx);
 
     // Writer loop: worker output may complete out of order, but the stream
@@ -743,7 +874,7 @@ impl Drop for FileCleanupGuard<'_> {
 /// extraction for directory transfers.
 ///
 /// For single-file transfers, a non-zero `resume_offset` (aligned to a
-/// [`CHUNK_SIZE`] boundary) appends to an existing partial file instead of
+/// `CHUNK_SIZE` boundary) appends to an existing partial file instead of
 /// truncating it: the on-disk prefix is hashed first so the returned checksum
 /// covers the whole file, and a failed transfer keeps the partial file for a
 /// later resume instead of deleting it.
@@ -857,14 +988,18 @@ where
         PayloadSink::Channel(tx)
     };
 
-    let (enc_tx, enc_rx) = flume::bounded::<Result<(usize, Vec<u8>), io::Error>>(16);
-    let (plain_tx, plain_rx) = flume::unbounded::<Result<(usize, Vec<u8>), EngineError>>();
-
     // Decrypt/decompress workers: isolate CPU-bound tasks in a worker pool.
     let num_workers = std::thread::available_parallelism()
         .map_or(4, std::num::NonZeroUsize::get)
         .saturating_sub(1)
         .max(2);
+
+    let (enc_tx, enc_rx) = flume::bounded::<Result<(usize, Vec<u8>), io::Error>>(16);
+    // Bounded so a slow disk writer applies backpressure to the decrypt
+    // workers and, through the network reader, to the peer. An unbounded
+    // queue here let a fast sender fill RAM before `write_all_at` caught up.
+    let (plain_tx, plain_rx) =
+        flume::bounded::<Result<(usize, Vec<u8>), EngineError>>(num_workers * 4);
 
     for _ in 0..num_workers {
         let enc_rx = enc_rx.clone();
@@ -1285,7 +1420,7 @@ mod tests {
             let started = std::time::Instant::now();
             let result = super::handshake_receiver_split(&mut send, &mut recv, None).await;
             assert!(
-                matches!(result, Err(crate::EngineError::ProtocolMismatch { local: 7, remote: 5 })),
+                matches!(result, Err(crate::EngineError::ProtocolMismatch { local: 8, remote: 5 })),
                 "expected ProtocolMismatch, got {result:?}"
             );
             assert!(started.elapsed().as_secs() < 2, "version gate must not block");
@@ -1305,7 +1440,7 @@ mod tests {
             assert!(
                 matches!(
                     result,
-                    Err(crate::EngineError::ProtocolMismatch { local: 7, remote: 99 })
+                    Err(crate::EngineError::ProtocolMismatch { local: 8, remote: 99 })
                 ),
                 "expected ProtocolMismatch, got {result:?}"
             );

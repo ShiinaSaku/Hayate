@@ -126,11 +126,11 @@
 //!
 //! A transfer establishes QUIC, opens a bidirectional stream, negotiates
 //! protocol version and cipher capability, performs X25519 key agreement,
-//! derives a 32-byte AEAD key, encrypts metadata (including chosen hash
-//! algorithm), sends receiver consent, and then streams length-prefixed
-//! encrypted payload frames. File transfers must finish with the
-//! exact announced byte count; directory transfers are tar streams with
-//! containment checks during extraction.
+//! stretches any passphrase with Argon2id, derives a 32-byte AEAD key,
+//! encrypts metadata (including chosen hash algorithm), sends receiver
+//! consent, and then streams length-prefixed encrypted payload frames. File
+//! transfers must finish with the exact announced byte count; directory
+//! transfers are tar streams with containment checks during extraction.
 //!
 //! ## Safety Guarantees
 //!
@@ -142,10 +142,10 @@
 //! * Directory extraction rejects absolute paths, `..`, and symlinks; hard
 //!   links are collected and replayed after their targets are extracted.
 //! * Each transfer uses a fresh random HKDF salt and a transcript-bound key
-//!   derivation. When a passphrase is used, it is mixed into the IKM; this
-//!   authenticates the session against an eavesdropper but is **not a PAKE** on
-//!   its own — offline brute-force resistance depends on the word-list entropy
-//!   (see the CLI word-list hardening in the matching Tier 2 change).
+//!   derivation. When a passphrase is used, it is stretched with memory-hard
+//!   Argon2id before entering the IKM; this authenticates the session against
+//!   an eavesdropper and makes active-MITM offline guessing expensive, though
+//!   it is still not a full PAKE.
 //! * Receive task failures are returned as [`EngineError`] instead of
 //!   panicking.
 //!

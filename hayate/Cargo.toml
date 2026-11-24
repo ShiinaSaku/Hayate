@@ -38,6 +38,8 @@ rand_core = { version = "0.10" }
 getrandom = { version = "0.4", features = ["sys_rng"] }
 ring = { workspace = true }
 x25519-dalek = { workspace = true }
+argon2 = { workspace = true }
+zeroize = { workspace = true }
 
 # Directory packaging and safe extraction.
 tar = { workspace = true }

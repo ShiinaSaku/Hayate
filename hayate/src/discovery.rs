@@ -34,7 +34,7 @@ const UDP_DISCOVERY_PORT: u16 = 50002;
 
 /// UDP port used for active "who is here?" discovery queries.
 ///
-/// Kept separate from [`UDP_DISCOVERY_PORT`] so a receiver can answer queries
+/// Kept separate from `UDP_DISCOVERY_PORT` so a receiver can answer queries
 /// while a pairing session is listening for sender broadcasts on the other
 /// port.
 pub const DISCOVERY_QUERY_PORT: u16 = 50003;
@@ -155,9 +155,6 @@ pub fn start_broadcaster_hybrid(
         ("ip", ip_str.as_str()),
         ("version", env!("CARGO_PKG_VERSION")),
     ];
-
-    let ip_str = crate::local_addr::primary_local_ipv4()
-        .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string());
 
     let service = mdns_sd::ServiceInfo::new(
         MDNS_SERVICE_TYPE,
@@ -373,9 +370,9 @@ fn responder_loop(name: &str, os: &str, ip: &str, quic_port: u16, cancel: &Atomi
 
 /// Actively asks every local network for Hayate receivers.
 ///
-/// Broadcasts [`QUERY_MAGIC`] to the all-ones broadcast address of every local
+/// Broadcasts `QUERY_MAGIC` to the all-ones broadcast address of every local
 /// interface (plus loopback for same-machine peers) and collects
-/// [`REPLY_MAGIC`] replies until `timeout` elapses. This costs two packets
+/// `REPLY_MAGIC` replies until `timeout` elapses. This costs two packets
 /// instead of a full subnet sweep and works on networks that block mDNS.
 ///
 /// Discovery is unauthenticated: treat replies as hints and let the pairing
@@ -549,22 +546,7 @@ pub fn listen_for_broadcast(
     let target_cid_udp = target_channel_id.clone();
     let found_tx_udp = found_tx;
     let udp_task = std::thread::spawn(move || -> Result<(), io::Error> {
-        let std_socket = socket2::Socket::new(
-            socket2::Domain::IPV4,
-            socket2::Type::DGRAM,
-            Some(socket2::Protocol::UDP),
-        )?;
-        std_socket.set_reuse_address(true)?;
-        #[cfg(not(windows))]
-        std_socket.set_reuse_port(true)?;
-
-        let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), UDP_DISCOVERY_PORT);
-        std_socket.bind(&socket2::SockAddr::from(listen_addr))?;
-        // Without a read timeout `recv_from` blocks forever and the main
-        // thread's `join()` would hang past the scan deadline.
-        std_socket.set_read_timeout(Some(Duration::from_millis(200)))?;
-
-        let socket: std::net::UdpSocket = std_socket.into();
+        let socket = bind_udp_listener()?;
         let mut buf = [0u8; 1024];
         let deadline = Instant::now() + timeout;
 
@@ -670,22 +652,7 @@ pub fn scan(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
     // UDP listener (background thread).
     let found_tx_udp = found_tx;
     let udp_task = std::thread::spawn(move || -> Result<(), io::Error> {
-        let std_socket = socket2::Socket::new(
-            socket2::Domain::IPV4,
-            socket2::Type::DGRAM,
-            Some(socket2::Protocol::UDP),
-        )?;
-        std_socket.set_reuse_address(true)?;
-        #[cfg(not(windows))]
-        std_socket.set_reuse_port(true)?;
-
-        let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), UDP_DISCOVERY_PORT);
-        std_socket.bind(&socket2::SockAddr::from(listen_addr))?;
-        // Without a read timeout `recv_from` blocks forever and the main
-        // thread's `join()` would hang past the scan deadline.
-        std_socket.set_read_timeout(Some(Duration::from_millis(200)))?;
-
-        let socket: std::net::UdpSocket = std_socket.into();
+        let socket = bind_udp_listener()?;
         let mut buf = [0u8; 1024];
         let deadline = Instant::now() + timeout;
         while Instant::now() <= deadline {
@@ -732,6 +699,28 @@ pub fn scan(timeout: Duration) -> Result<Vec<DiscoveredPeer>, io::Error> {
     let _ = mdns_task.join();
     let _ = udp_task.join();
     Ok(peers)
+}
+
+/// Binds the shared UDP discovery listener socket.
+///
+/// Discovery workers run on their own threads and join after a deadline, so the
+/// socket needs a read timeout; without one `recv_from` would block forever and
+/// the join would hang past the scan deadline. `SO_REUSEPORT` is Unix-only, and
+/// a single socket per process is enough on Windows.
+fn bind_udp_listener() -> Result<std::net::UdpSocket, io::Error> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    socket.set_reuse_address(true)?;
+    #[cfg(not(windows))]
+    socket.set_reuse_port(true)?;
+
+    let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), UDP_DISCOVERY_PORT);
+    socket.bind(&socket2::SockAddr::from(listen_addr))?;
+    socket.set_read_timeout(Some(Duration::from_millis(200)))?;
+    Ok(socket.into())
 }
 
 /// Parses a UDP discovery packet: `HAYATE_PEER:v2:<ChannelID>:<OS>:<Port>`.

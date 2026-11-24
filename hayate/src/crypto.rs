@@ -7,20 +7,26 @@
 //!   transfer; pass it to every frame operation with the `_with_key` variants.
 //!   The bare one-shot variants have been intentionally removed to avoid
 //!   accidentally paying key-expansion cost in the hot loop.
-//! * Nonces are generated with `ring`'s `SystemRandom` — the same CSPRNG
-//!   already in the dependency graph for AEAD.
+//! * Metadata uses a random 96-bit nonce from `ring`'s `SystemRandom`. Payload
+//!   frames use a per-worker nonce prefix plus a 64-bit counter, so the hot
+//!   loop never calls the CSPRNG and nonce reuse is structurally impossible
+//!   within a session.
+//! * A passphrase is stretched with memory-hard Argon2id before HKDF.
 //! * HKDF is performed via `ring::hkdf` (ring already exposes it); the
 //!   standalone `hkdf` crate has been dropped.
 //! * Key derivation uses a random, public per-session salt sent on the wire and
-//!   a transcript-bound HKDF info string. A passphrase, when provided, is mixed
-//!   into the HKDF input keying material, not used as the salt.
+//!   a transcript-bound HKDF info string. A passphrase, when provided, is
+//!   Argon2id-stretched and mixed into the HKDF input keying material, not used
+//!   as the salt.
 
+use argon2::{Algorithm, Argon2, Params, Version};
 use getrandom::SysRng;
 use rand_core::{Rng, UnwrapErr};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey};
 use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use x25519_dalek::{EphemeralSecret, PublicKey};
+use zeroize::Zeroize;
 
 use crate::EngineError;
 
@@ -41,6 +47,14 @@ pub const NONCE_LEN: usize = 12;
 
 /// Length of the AEAD authentication tag in bytes (16 bytes).
 pub const TAG_LEN: usize = 16;
+
+/// Argon2id memory cost in KiB (19 MiB — the OWASP minimum).
+const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
+/// Argon2id iteration count (2 — the OWASP minimum).
+const ARGON2_ITERATIONS: u32 = 2;
+/// Argon2id lane count. One lane keeps the handshake from spawning a thread
+/// pool just to stretch a four-word code.
+const ARGON2_LANES: u32 = 1;
 
 /// Dynamically detects if the host CPU possesses hardware AES acceleration.
 ///
@@ -191,17 +205,29 @@ pub fn derive_key(ctx: KeyDerivationContext<'_>) -> Result<[u8; 32], EngineError
     let hkdf_salt = hkdf::Salt::new(hkdf::HKDF_SHA256, ctx.salt.as_slice());
 
     // Structure the IKM so the passphrase and no-passphrase cases are
-    // unambiguous: fixed-length shared secret followed by a tagged
-    // passphrase, or an explicit no-passphrase marker.
-    let mut ikm = Vec::with_capacity(PUBLIC_KEY_LEN + 1 + ctx.passphrase.map_or(0, str::len));
+    // unambiguous: fixed-length shared secret followed by a tagged secret,
+    // or an explicit no-passphrase marker. A passphrase is stretched with
+    // memory-hard Argon2id first, so an active on-path attacker who learns
+    // both X25519 shared secrets cannot cheaply brute-force the four-word
+    // code offline. The salt is per-session and public, which is exactly what
+    // Argon2 needs.
+    let mut ikm = Vec::with_capacity(PUBLIC_KEY_LEN + 1 + 32);
     ikm.extend_from_slice(shared.as_bytes());
     if let Some(phrase) = ctx.passphrase {
-        ikm.push(0x01);
-        ikm.extend_from_slice(phrase.as_bytes());
+        let params = Params::new(ARGON2_MEMORY_KIB, ARGON2_ITERATIONS, ARGON2_LANES, Some(32))
+            .map_err(|_| EngineError::Crypto("invalid Argon2id parameters"))?;
+        let mut stretched = [0u8; 32];
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            .hash_password_into(phrase.as_bytes(), ctx.salt.as_slice(), &mut stretched)
+            .map_err(|_| EngineError::Crypto("Argon2id passphrase stretch failed"))?;
+        ikm.push(0x02);
+        ikm.extend_from_slice(&stretched);
+        stretched.zeroize();
     } else {
         ikm.push(0x00);
     }
     let prk = hkdf_salt.extract(&ikm);
+    ikm.zeroize();
 
     let version_bytes = crate::protocol::PROTOCOL_VERSION.to_be_bytes();
     let info = [
@@ -211,7 +237,7 @@ pub fn derive_key(ctx: KeyDerivationContext<'_>) -> Result<[u8; 32], EngineError
         ctx.sender_pub.as_slice(),
         ctx.receiver_pub.as_slice(),
         ctx.salt.as_slice(),
-        b"hayate-v2",
+        b"hayate-v3",
     ];
 
     let okm = prk
@@ -237,10 +263,33 @@ pub fn encrypt_frame_with_key<'buf>(
     // ring's SystemRandom is already in the dep graph for AEAD; no extra crate.
     let mut nonce_bytes = [0u8; NONCE_LEN];
     SystemRandom::new().fill(&mut nonce_bytes).map_err(|_| EngineError::Crypto("RNG failed"))?;
-    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    encrypt_frame_with_nonce(key, &nonce_bytes, plaintext, buf)
+}
+
+/// Encrypts `plaintext` with a caller-supplied 96-bit nonce.
+///
+/// This is the hot-path variant for payload frames. The caller **must** use
+/// each nonce at most once with a given key. Payload workers build a unique
+/// nonce from their worker index and a monotonically increasing frame
+/// counter, which removes a CSPRNG call (and the 96-bit random-nonce
+/// birthday bound) from every 4 MiB frame.
+///
+/// Metadata still uses [`encrypt_frame_with_key`] because it is a one-shot
+/// value and a random nonce is simpler there.
+///
+/// # Errors
+///
+/// Returns [`EngineError::Crypto`] if AEAD sealing fails.
+pub fn encrypt_frame_with_nonce<'buf>(
+    key: &AeadKey,
+    nonce_bytes: &[u8; NONCE_LEN],
+    plaintext: &[u8],
+    buf: &'buf mut Vec<u8>,
+) -> Result<&'buf [u8], EngineError> {
+    let nonce = Nonce::assume_unique_for_key(*nonce_bytes);
 
     let start = buf.len();
-    buf.extend_from_slice(&nonce_bytes);
+    buf.extend_from_slice(nonce_bytes);
 
     let plain_start = buf.len();
     buf.extend_from_slice(plaintext);
@@ -464,6 +513,28 @@ mod tests {
             let dec = decrypt_metadata(&key, cipher_id, &enc).unwrap();
             assert_eq!(plain, dec.as_slice());
         }
+    }
+
+    #[test]
+    fn caller_supplied_nonce_roundtrips_and_is_not_reused_implicitly() {
+        let key = [7u8; 32];
+        let aead = AeadKey::new(&key, CIPHER_CHACHA20).unwrap();
+        let nonce_a = [1u8; NONCE_LEN];
+        let nonce_b = [2u8; NONCE_LEN];
+
+        let mut frame_a = Vec::new();
+        crypto_frame(&aead, &nonce_a, b"same plaintext", &mut frame_a);
+        let mut frame_b = Vec::new();
+        crypto_frame(&aead, &nonce_b, b"same plaintext", &mut frame_b);
+        assert_ne!(frame_a, frame_b, "different nonces must produce different frames");
+
+        let mut out = Vec::new();
+        decrypt_frame_into_with_key(&aead, &frame_a, &mut out).unwrap();
+        assert_eq!(out, b"same plaintext");
+    }
+
+    fn crypto_frame(aead: &AeadKey, nonce: &[u8; NONCE_LEN], plain: &[u8], out: &mut Vec<u8>) {
+        encrypt_frame_with_nonce(aead, nonce, plain, out).unwrap();
     }
 
     #[test]

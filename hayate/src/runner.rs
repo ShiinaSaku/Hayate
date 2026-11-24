@@ -29,6 +29,12 @@ use crate::{EngineError, network, transfer};
 /// dialing a dead LAN address.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long the application-layer handshake may take before the connection is
+/// torn down. Without this, a peer that cannot derive the key (wrong
+/// passphrase) or disappears leaves the other side waiting for a QUIC idle
+/// timeout.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 // ---------------------------------------------------------------------------
 // Stages and outcomes
 // ---------------------------------------------------------------------------
@@ -217,7 +223,7 @@ impl HayateSender {
         self
     }
 
-    /// Sets the passphrase mixed into application-layer key derivation.
+    /// Sets the passphrase stretched into application-layer key derivation.
     ///
     /// Useful with [`Self::target`] when peers share a secret without pairing
     /// discovery. When unset, [`Self::code`] is used if present.
@@ -303,7 +309,7 @@ impl HayateSender {
         // Establish the QUIC connection
         let (_endpoint, conn) = if let Some(target_addr) = self.target {
             on_stage(TransferStage::Connecting { peer: target_addr })?;
-            let endpoint = network::bind_client_for(target_addr).await?;
+            let endpoint = network::bind_client_for(target_addr)?;
             let client_cfg = network::client_config()?;
             let connecting = endpoint.connect(target_addr, "hayate.local", Some(client_cfg))?;
             let conn = compio::time::timeout(CONNECT_TIMEOUT, connecting)
@@ -319,7 +325,7 @@ impl HayateSender {
 
             let bind_addr =
                 SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0);
-            let endpoint = network::bind_server(bind_addr).await?;
+            let endpoint = network::bind_server(bind_addr)?;
             let local_port = endpoint.local_addr()?.port();
 
             let channel_id = crate::discovery::derive_channel_id(phrase);
@@ -344,13 +350,27 @@ impl HayateSender {
         let (mut send_stream, mut recv_stream) = conn.open_bi()?;
 
         on_stage(TransferStage::Handshaking)?;
-        let (key, cipher_id) = transfer::handshake_sender_split(
-            &mut send_stream,
-            &mut recv_stream,
-            &meta,
-            passphrase.as_deref(),
+        let handshake = compio::time::timeout(
+            HANDSHAKE_TIMEOUT,
+            transfer::handshake_sender_split(
+                &mut send_stream,
+                &mut recv_stream,
+                &meta,
+                passphrase.as_deref(),
+            ),
         )
-        .await?;
+        .await
+        .unwrap_or_else(|_| {
+            conn.close(0u32.into(), b"handshake timeout");
+            Err(EngineError::TimedOut("waiting for the receiver handshake".into()))
+        });
+        let (key, cipher_id) = match handshake {
+            Ok(value) => value,
+            Err(error) => {
+                conn.close(0u32.into(), b"handshake failed");
+                return Err(error);
+            },
+        };
 
         on_stage(TransferStage::Ready { meta: meta.clone(), cipher_id, peer, total_size })?;
 
@@ -368,7 +388,7 @@ impl HayateSender {
 
         on_stage(TransferStage::Transferring { filename: meta.filename.clone(), total_size })?;
 
-        let checksum = if path.is_dir() {
+        let transfer_result = if path.is_dir() {
             self.send_directory(
                 path,
                 &key,
@@ -377,7 +397,7 @@ impl HayateSender {
                 &mut send_stream,
                 progress_cb,
             )
-            .await?
+            .await
         } else {
             self.send_file_at(
                 path,
@@ -388,7 +408,14 @@ impl HayateSender {
                 &mut send_stream,
                 progress_cb,
             )
-            .await?
+            .await
+        };
+        let checksum = match transfer_result {
+            Ok(checksum) => checksum,
+            Err(error) => {
+                conn.close(0u32.into(), b"transfer failed");
+                return Err(error);
+            },
         };
 
         on_stage(TransferStage::Finishing)?;
@@ -406,10 +433,36 @@ impl HayateSender {
         Ok(SendOutcome { checksum, meta, cipher_id, peer, total_size })
     }
 
-    /// Builds [`Metadata`] and estimates total byte size for `path`.
-    ///
-    /// Callers who perform their own QUIC connection and handshake can use this
-    /// instead of [`Self::send`] to interleave terminal UI between stages.
+    /// Sends a single file, optionally resuming at `offset`.
+    #[allow(clippy::too_many_arguments)]
+    async fn send_file_at(
+        &self,
+        path: &Path,
+        offset: u64,
+        key: &[u8; 32],
+        cipher_id: u8,
+        hash_algo: &str,
+        stream: &mut compio_quic::SendStream,
+        mut progress_cb: impl FnMut(u64) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<String, EngineError> {
+        let file = compio::fs::File::open(path).await.map_err(EngineError::Io)?;
+        let source = transfer::PayloadSource::File { file, pos: offset };
+        let filename = path.file_name().and_then(|s| s.to_str());
+        transfer::send_payload_write(
+            key,
+            cipher_id,
+            source,
+            stream,
+            self.compress,
+            filename,
+            hash_algo,
+            self.rate_limit,
+            move |sent| progress_cb(offset + sent),
+        )
+        .await
+    }
+
+    /// Builds [`Metadata`] and estimates the total byte size for `path`.
     ///
     /// # Errors
     ///
@@ -439,74 +492,13 @@ impl HayateSender {
         }
     }
 
-    /// Sends a single file over an already-established QUIC send stream.
-    ///
-    /// Prefer [`Self::send_with`] unless you own the connection lifecycle.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if file I/O, compression, encryption, or network
-    /// write fails.
-    pub async fn send_file(
-        &self,
-        path: &Path,
-        key: &[u8; 32],
-        cipher_id: u8,
-        hash_algo: &str,
-        stream: &mut compio_quic::SendStream,
-        progress_cb: impl FnMut(u64) -> Result<(), EngineError> + Send + 'static,
-    ) -> Result<String, EngineError> {
-        self.send_file_at(path, 0, key, cipher_id, hash_algo, stream, progress_cb).await
-    }
-
-    /// Like [`Self::send_file`], but starts reading at `offset` (a resume).
-    ///
-    /// The skipped prefix is still hashed locally so the returned checksum
-    /// covers the entire file, and `progress_cb` reports positions relative
-    /// to the start of the file (i.e. offset + bytes sent).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if file I/O, compression, encryption, or network
-    /// write fails.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn send_file_at(
-        &self,
-        path: &Path,
-        offset: u64,
-        key: &[u8; 32],
-        cipher_id: u8,
-        hash_algo: &str,
-        stream: &mut compio_quic::SendStream,
-        mut progress_cb: impl FnMut(u64) -> Result<(), EngineError> + Send + 'static,
-    ) -> Result<String, EngineError> {
-        let file = compio::fs::File::open(path).await.map_err(EngineError::Io)?;
-        let source = transfer::PayloadSource::File { file, pos: offset };
-        let filename = path.file_name().and_then(|s| s.to_str());
-        transfer::send_payload_write(
-            key,
-            cipher_id,
-            source,
-            stream,
-            self.compress,
-            filename,
-            hash_algo,
-            self.rate_limit,
-            move |sent| progress_cb(offset + sent),
-        )
-        .await
-    }
-
-    /// Sends a directory as a tar stream over an already-established QUIC send
-    /// stream.
-    ///
-    /// Prefer [`Self::send_with`] unless you own the connection lifecycle.
+    /// Sends a directory as a tar stream.
     ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if tar packaging, compression, encryption, or
     /// network write fails.
-    pub async fn send_directory(
+    async fn send_directory(
         &self,
         dir: &Path,
         key: &[u8; 32],
@@ -643,7 +635,7 @@ impl HayateReceiver {
         self
     }
 
-    /// Sets the passphrase mixed into application-layer key derivation.
+    /// Sets the passphrase stretched into application-layer key derivation.
     ///
     /// Mirrors [`HayateSender::passphrase`]: required when the sender sets an
     /// explicit passphrase in direct-target mode. When unset, [`Self::code`]
@@ -762,7 +754,7 @@ impl HayateReceiver {
             };
 
             on_stage(TransferStage::Connecting { peer: peer_addr })?;
-            let endpoint = network::bind_client_for(peer_addr).await?;
+            let endpoint = network::bind_client_for(peer_addr)?;
             let client_cfg = network::client_config()?;
             let connecting = endpoint.connect(peer_addr, "hayate.local", Some(client_cfg))?;
             let conn = compio::time::timeout(CONNECT_TIMEOUT, connecting)
@@ -771,7 +763,7 @@ impl HayateReceiver {
             (endpoint, conn)
         } else {
             on_stage(TransferStage::WaitingForPeer)?;
-            let endpoint = network::bind_server(self.bind_addr).await?;
+            let endpoint = network::bind_server(self.bind_addr)?;
             let incoming = compio::time::timeout(Duration::from_mins(1), endpoint.wait_incoming())
                 .await
                 .map_err(|_| EngineError::TimedOut("waiting for sender".into()))?
@@ -805,13 +797,14 @@ impl HayateReceiver {
     ///
     /// Returns [`EngineError`] if binding the UDP/QUIC endpoint fails, or if a
     /// pairing code was configured (use the one-shot receive path instead).
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)] // Keep the async API shape.
     pub async fn listen(self) -> Result<ListeningReceiver, EngineError> {
         if self.code.is_some() {
             return Err(EngineError::Handshake(
                 "listen() is for direct mode only; use receive_with() for pairing codes".into(),
             ));
         }
-        let endpoint = network::bind_server(self.bind_addr).await?;
+        let endpoint = network::bind_server(self.bind_addr)?;
         Ok(ListeningReceiver {
             endpoint,
             passphrase: self.passphrase,
@@ -903,8 +896,27 @@ async fn complete_receive_session(
     let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
 
     on_stage(TransferStage::Handshaking)?;
-    let ((key, cipher_id), meta, peer_version) =
-        transfer::handshake_receiver_split(&mut send_stream, &mut recv_stream, passphrase).await?;
+    let handshake = compio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        transfer::handshake_receiver_split(&mut send_stream, &mut recv_stream, passphrase),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        conn.close(0u32.into(), b"handshake timeout");
+        Err(EngineError::TimedOut("waiting for the sender handshake".into()))
+    });
+    let ((key, cipher_id), meta) = match handshake {
+        Ok(value) => value,
+        Err(error) => {
+            // The receiver may have written a plaintext auth-reject byte.
+            // Finish the stream and give QUIC a moment to deliver it before
+            // the connection close discards the stream data.
+            let _ = send_stream.finish();
+            compio::time::sleep(Duration::from_millis(30)).await;
+            conn.close(0u32.into(), b"handshake failed");
+            return Err(error);
+        },
+    };
 
     on_stage(TransferStage::Offer { meta: meta.clone(), cipher_id, peer })?;
 
@@ -919,13 +931,9 @@ async fn complete_receive_session(
         return Err(EngineError::TransferRejected);
     };
 
-    // v6 senders predate the resume offset: never write it, or their payload
-    // reader would consume our offset bytes as frame data.
-    let resume_offset =
-        if peer_version >= 7 { compute_resume_offset(&dest, &meta, resume) } else { 0 };
-    if peer_version >= 7 {
-        transfer::write_resume_offset(&mut send_stream, resume_offset).await?;
-    }
+    // v8 peers always exchange the resume offset after consent.
+    let resume_offset = compute_resume_offset(&dest, &meta, resume);
+    transfer::write_resume_offset(&mut send_stream, resume_offset).await?;
     if resume_offset > 0 {
         on_stage(TransferStage::Resuming { offset: resume_offset })?;
     }
@@ -935,7 +943,7 @@ async fn complete_receive_session(
         total_size: meta.total_size,
     })?;
 
-    let stats = transfer::receive_payload_split(
+    let stats = match transfer::receive_payload_split(
         &key,
         cipher_id,
         &mut recv_stream,
@@ -946,7 +954,14 @@ async fn complete_receive_session(
         resume_offset,
         progress_cb,
     )
-    .await?;
+    .await
+    {
+        Ok(stats) => stats,
+        Err(error) => {
+            conn.close(0u32.into(), b"transfer failed");
+            return Err(error);
+        },
+    };
 
     on_stage(TransferStage::Finishing)?;
     let _ = send_stream.finish();

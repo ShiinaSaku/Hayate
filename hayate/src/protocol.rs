@@ -4,7 +4,7 @@
 //!
 //! | Direction | Bytes | Field |
 //! | --- | ---: | --- |
-//! | Sender to receiver | 2 | Protocol version, equal to [`PROTOCOL_VERSION`] |
+//! | Sender to receiver | 2 | Protocol version, equal to `PROTOCOL_VERSION` |
 //! | Sender to receiver | 1 | Sender's preferred cipher capability |
 //! | Sender to receiver | 32 | Sender X25519 public key |
 //! | Sender to receiver | 32 | HKDF salt (random per session, sent in the clear) |
@@ -12,7 +12,7 @@
 //! | Receiver to sender | 1 | Selected cipher suite |
 //! | Sender to receiver | 4 | Encrypted metadata length |
 //! | Sender to receiver | N | Metadata frame: nonce, ciphertext, authentication tag |
-//! | Receiver to sender | 1 | Consent byte: `0x01` accept, `0x00` reject |
+//! | Receiver to sender | 1 | Consent byte: `0x01` accept, `0x00` reject, `0xff` auth failure |
 //! | Receiver to sender | 8 | Resume offset (accepted transfers only; `0` = fresh) |
 //! | Sender to receiver | 4 | Encrypted payload frame length |
 //! | Sender to receiver | N | Payload frame: nonce, encrypted flag/payload, authentication tag |
@@ -28,15 +28,16 @@
 //! | 1 | Hash algorithm name length |
 //! | H | Hash algorithm name |
 //!
-//! Decrypted payload frames begin with one flag byte: [`FRAME_RAW`] for
-//! uncompressed payloads, [`FRAME_ZSTD`] for zstd-compressed payloads.
+//! Decrypted payload frames begin with one flag byte: `FRAME_RAW` for
+//! uncompressed payloads, `FRAME_ZSTD` for zstd-compressed payloads.
 
 /// Current binary wire protocol version.
 ///
-/// v7 adds the 8-byte resume offset the receiver sends after an accept
-/// consent byte. Mixed v6/v7 peers fail the version check instead of
-/// deadlocking on the extra bytes.
-pub(crate) const PROTOCOL_VERSION: u16 = 7;
+/// v8 replaces the raw-HKDF passphrase mix with an Argon2id-stretched secret
+/// and makes the resume offset mandatory. Peers older than v8 are rejected:
+/// silently accepting them would derive a different session key for
+/// passphrase transfers.
+pub(crate) const PROTOCOL_VERSION: u16 = 8;
 
 /// Metadata transfer type for a single file.
 pub(crate) const TRANSFER_FILE: u8 = 0x00;
