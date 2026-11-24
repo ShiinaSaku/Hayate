@@ -1,79 +1,98 @@
 ---
-title: "Hayate"
-description: "Send files and folders between your own machines over the local network. Encrypted, compressed and verified, with no cloud, accounts or SSH."
-mode: "custom"
+title: "Hayate overview"
+sidebarTitle: "Overview"
+description: "Learn about Hayate, the encrypted, compressed file transfer tool that moves files and folders directly between your machines on the local network."
 ---
 
-<div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
-  <div className="relative rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(0,0,0,0.04),transparent_60%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.06),transparent_60%)]">
-    <div className="px-6 sm:px-12 pt-14 pb-12">
-      <p className="not-prose inline-flex items-center gap-2 rounded-full border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">
-        v7 is here: Argon2id pairing, protocol v8 and a new dashboard
-      </p>
-      <h1 className="mt-6 max-w-3xl text-4xl sm:text-5xl font-semibold tracking-tight leading-tight text-neutral-950 dark:text-neutral-50">
-        Encrypted file transfer for your local network.
-      </h1>
-      <p className="mt-5 max-w-2xl text-base sm:text-lg leading-relaxed text-neutral-600 dark:text-neutral-400">
-        One binary on each machine. Hayate pairs them with a short phrase, then streams your files encrypted, compressed and verified. No cloud, accounts or SSH.
-      </p>
-      <div className="not-prose mt-8 flex flex-wrap gap-3">
-        <a href="/quickstart" className="inline-flex items-center rounded-full bg-neutral-950 dark:bg-neutral-50 px-5 py-2.5 text-sm font-medium text-white dark:text-neutral-950 no-underline hover:opacity-90">
-          Getting started
-        </a>
-        <a href="https://github.com/ShiinaSaku/Hayate" className="inline-flex items-center rounded-full border border-neutral-300 dark:border-neutral-700 px-5 py-2.5 text-sm font-medium text-neutral-950 dark:text-neutral-50 no-underline hover:bg-neutral-100 dark:hover:bg-neutral-900">
-          View on GitHub
-        </a>
-      </div>
-    </div>
+## Get started in 30 seconds
 
-    <div className="border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 px-6 sm:px-12 py-8">
-      <div className="not-prose font-mono text-sm leading-7 text-neutral-800 dark:text-neutral-200 overflow-x-auto">
-        <div className="whitespace-nowrap"><span className="text-neutral-400 dark:text-neutral-600">$</span> hayate send ./photos.zip</div>
-        <div className="whitespace-nowrap text-neutral-500">Pairing code: <span className="text-neutral-950 dark:text-neutral-50 font-semibold">forest-river-mango-silver-orbit</span></div>
-        <div className="mt-3 whitespace-nowrap"><span className="text-neutral-400 dark:text-neutral-600">$</span> hayate receive --code "forest-river-mango-silver-orbit"</div>
-      </div>
-    </div>
-  </div>
+Prerequisites:
 
-  <div className="not-prose mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 border-l border-t border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden">
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">No infrastructure</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">No relay, rendezvous server or SSH daemon. Two devices on the same network are enough.</p>
-    </div>
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Authenticated by a phrase</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">A 5-word phrase, stretched with Argon2id, protects the X25519 key exchange.</p>
-    </div>
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Fast where it counts</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">QUIC with 4 MiB frames and read-ahead. zstd and AEAD run on dedicated threads.</p>
-    </div>
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Resumable and verified</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">Interrupted files continue from the last frame. Checksums cover the whole file.</p>
-    </div>
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Local dashboard</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">Drag-and-drop sends and live history in your browser, without leaving your machine.</p>
-    </div>
-    <div className="border-r border-b border-neutral-200 dark:border-neutral-800 p-6">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Built to script</p>
-      <p className="mt-2 text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">NDJSON events, stable exit codes and a Rust library crate.</p>
-    </div>
-  </div>
+- Two machines on the same local network
+- A terminal on each (macOS, Linux, Windows, or Android via Termux)
 
-  <div className="not-prose mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
-    <a href="/quickstart" className="group block rounded-2xl border border-neutral-200 dark:border-neutral-800 p-6 no-underline hover:bg-neutral-50 dark:hover:bg-neutral-900">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Guides →</p>
-      <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">Install, pair two machines, and send your first file.</p>
-    </a>
-    <a href="/cli/overview" className="group block rounded-2xl border border-neutral-200 dark:border-neutral-800 p-6 no-underline hover:bg-neutral-50 dark:hover:bg-neutral-900">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">CLI reference →</p>
-      <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">Every command, flag, environment variable and exit code.</p>
-    </a>
-    <a href="/library/overview" className="group block rounded-2xl border border-neutral-200 dark:border-neutral-800 p-6 no-underline hover:bg-neutral-50 dark:hover:bg-neutral-900">
-      <p className="text-sm font-semibold text-neutral-950 dark:text-neutral-50">Rust library →</p>
-      <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">Embed the engine with HayateSender and HayateReceiver.</p>
-    </a>
-  </div>
-</div>
+**Install Hayate on both machines:**
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl --proto '=https' --tlsv1.2 -LsSf \
+      https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-cli-installer.sh | sh
+    ```
+  </Tab>
+  <Tab title="npm">
+    ```bash
+    npm install -g @shiinasaku/hayate
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Download and run `hayate-cli-installer.ps1` from the [latest release](https://github.com/ShiinaSaku/Hayate/releases/latest) in PowerShell.
+  </Tab>
+</Tabs>
+
+**Send a file:**
+
+```bash
+hayate send ./photos.zip
+```
+
+Hayate prints a pairing phrase. **Receive it on the other machine:**
+
+```bash
+hayate receive --code "forest-river-mango-silver-orbit"
+```
+
+That's it. The file arrives encrypted, compressed and verified. [Continue with the quickstart (2 minutes) →](/quickstart)
+
+<Tip>
+  See [installation](/installation) for release archives, building from source, and Android. See [troubleshooting](/guides/discovery#troubleshooting) if the machines can't find each other.
+</Tip>
+
+## What Hayate does for you
+
+- **Pairs machines without addresses.** Run `hayate send`, read out a 5-word phrase, and the receiver finds the sender on its own. When you know the address, send to `ip:port` directly.
+- **Encrypts every transfer.** Each transfer uses a fresh X25519 key exchange. The phrase, stretched with Argon2id, authenticates it, and every 4 MiB frame is sealed with AES-256-GCM or ChaCha20-Poly1305.
+- **Moves folders, not just files.** Directories stream as a tar archive, compressed and encrypted on the fly, and extract safely on the other side.
+- **Recovers from interruptions.** Interrupted files continue from the last frame, and the checksum covers the whole file.
+- **Gives you a dashboard.** `hayate web` opens a local, token-gated page for drag-and-drop sends, a receive listener and live history.
+
+## Why people use Hayate
+
+- **No infrastructure.** There is no relay, rendezvous server or SSH daemon. Nothing leaves your network.
+- **One binary.** A single static binary for macOS, Linux and Windows. No runtime, no accounts.
+- **Fast on a LAN.** QUIC with read-ahead, adaptive zstd compression, and encryption on dedicated threads.
+- **Scriptable.** NDJSON events, stable exit codes, and a Rust library crate for building your own interface.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Pair two machines and send your first file
+  </Card>
+  <Card title="Sending and receiving" icon="arrow-left-right" href="/guides/sending-and-receiving">
+    Directories, resume, overwrites and bandwidth limits
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Every command, flag and exit code
+  </Card>
+  <Card title="Web dashboard" icon="layout-dashboard" href="/guides/dashboard">
+    Send and receive from your browser
+  </Card>
+</CardGroup>
+
+## Additional resources
+
+<CardGroup cols={2}>
+  <Card title="Rust library" icon="box" href="/library/overview">
+    Embed the transfer engine in your own application
+  </Card>
+  <Card title="Security" icon="shield-check" href="/security/how-it-works">
+    How transfers are encrypted, and the threat model
+  </Card>
+  <Card title="Scripting and automation" icon="code" href="/guides/scripting">
+    JSON output, exit codes and unattended receivers
+  </Card>
+  <Card title="Comparison" icon="scale" href="/comparison">
+    How Hayate compares with scp, LocalSend, croc and sendme
+  </Card>
+</CardGroup>

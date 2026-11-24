@@ -1,17 +1,17 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "willow",
+  "theme": "mint",
   "name": "Hayate",
   "description": "Encrypted, compressed LAN file transfer. One binary, no cloud, no accounts, no SSH.",
   "colors": {
-    "primary": "#171717",
-    "light": "#fafafa",
-    "dark": "#171717"
+    "primary": "#0E0E0E",
+    "light": "#D4A27F",
+    "dark": "#0E0E0E"
   },
   "background": {
     "color": {
-      "light": "#ffffff",
-      "dark": "#0a0a0a"
+      "light": "#FDFDF7",
+      "dark": "#09090B"
     }
   },
   "appearance": {
@@ -29,10 +29,6 @@
   "navbar": {
     "links": [
       {
-        "label": "Docs",
-        "href": "/quickstart"
-      },
-      {
         "label": "crates.io",
         "href": "https://crates.io/crates/hayate"
       },
@@ -47,15 +43,14 @@
     }
   },
   "navigation": {
-    "dropdowns": [
+    "tabs": [
       {
-        "dropdown": "Guides",
-        "icon": "book-open",
-        "description": "Install, use and secure Hayate",
+        "tab": "Guides",
         "groups": [
           {
             "group": "Get started",
             "pages": [
+              "index",
               "installation",
               "quickstart"
             ]
@@ -86,9 +81,7 @@
         ]
       },
       {
-        "dropdown": "CLI reference",
-        "icon": "terminal",
-        "description": "Every command, flag and exit code",
+        "tab": "CLI reference",
         "groups": [
           {
             "group": "Commands",
@@ -112,9 +105,7 @@
         ]
       },
       {
-        "dropdown": "Rust library",
-        "icon": "box",
-        "description": "Embed the transfer engine",
+        "tab": "Rust library",
         "groups": [
           {
             "group": "Library",
@@ -140,16 +131,7 @@
       "view"
     ]
   },
-  "fonts": {
-    "family": "Geist"
-  },
   "styling": {
-    "eyebrows": "breadcrumbs",
-    "codeblocks": {
-      "theme": {
-        "light": "github-light",
-        "dark": "github-dark"
-      }
-    }
+    "eyebrows": "section"
   }
 }
