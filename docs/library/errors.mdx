@@ -1,0 +1,48 @@
+---
+title: "Errors"
+description: "Handle hayate::EngineError in Rust: rejected transfers, protocol mismatches, wrong passphrases, timeouts, cancellations and I/O, QUIC and archive errors."
+---
+
+Every fallible Hayate API returns `Result<_, hayate::EngineError>`. Match on the variants you want to handle and treat the rest as general failures.
+
+```rust
+use hayate::{EngineError, HayateSender};
+
+async fn run() {
+    let result = HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .send("./file.txt", |_| Ok(()))
+        .await;
+
+    match result {
+        Ok(checksum) => println!("sent: {checksum}"),
+        Err(EngineError::TransferRejected) => eprintln!("the receiver said no"),
+        Err(EngineError::InvalidPassphrase) => eprintln!("phrase mismatch"),
+        Err(EngineError::TimedOut(what)) => eprintln!("timed out: {what}"),
+        Err(err) => eprintln!("transfer failed: {err}"),
+    }
+}
+```
+
+## Variants
+
+- `TransferRejected`: the receiver rejected the offer.
+- `ProtocolMismatch { local, remote }`: the peers speak different wire protocol versions.
+- `InvalidPassphrase`: key exchange authentication failed because the phrases or passphrases differ.
+- `TimedOut(String)`: pairing, discovery or connecting took too long.
+- `Cancelled(String)`: the operation was cancelled.
+- `Io(std::io::Error)`: a file or socket operation failed.
+- `Handshake(String)`: the application-layer handshake failed.
+- `Crypto(&'static str)`: a cryptographic operation failed.
+- `InvalidFrame(String)`: the peer sent a malformed or oversized frame.
+- `Compression(String)`: zstd compression or decompression failed.
+- `PathTraversal`: a directory archive tried to write outside the output directory.
+- `Connect`, `Connection`, `OpenStream`, `Write` and `ClosedStream`: QUIC errors that wrap the underlying compio-quic error.
+
+`EngineError` is `#[non_exhaustive]`, so always include a wildcard arm.
+
+To abort a transfer from a callback, return an `EngineError` from the progress or stage callback. The engine stops and returns that error.
+
+When you run a listener, use `hayate::is_benign_peer_close(&err)` to ignore connections that a peer closed normally, such as probes from `hayate discover`. See [accept several transfers](/library/receiving#accept-several-transfers).
+
+The CLI turns these variants into [exit codes](/cli/exit-codes).

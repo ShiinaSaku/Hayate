@@ -1,0 +1,90 @@
+---
+title: "Sending and receiving"
+description: "Send files and directories with Hayate, resume interrupted transfers, control overwrites and bandwidth, and save receivers as named peers."
+---
+
+Hayate has two ways to connect a sender and a receiver:
+
+- **Pairing mode.** The sender prints a phrase and the receiver joins with `--code`. No addresses are needed, and the phrase authenticates the transfer.
+- **Direct mode.** The receiver listens on a port and the sender dials `ip:port` or `hostname:port`. Add `--passphrase` on both sides to authenticate it.
+
+See the [quickstart](/quickstart) for a first transfer in each mode.
+
+## Choose what to send
+
+Pass a file or a directory as the first argument. If you omit it, `hayate send` opens an interactive picker (this needs a terminal).
+
+Directories stream as a tar archive that Hayate compresses and encrypts on the fly:
+
+```bash
+hayate send ./my-project 192.168.1.50:50001
+```
+
+When the receiver extracts a directory, it rejects absolute paths, `..` components and symlinks. Hard links are replayed only after their target file is extracted.
+
+## Choose where to send
+
+`hayate send` picks the receiver in this order:
+
+1. A positional `TARGET` such as `192.168.1.50:50001`.
+2. A saved peer with `--to <NAME>`.
+3. A receiver you choose from a LAN scan with `--pick`.
+4. Otherwise, pairing mode with a generated phrase, or the phrase you pass with `--code`.
+
+`--passphrase` only works with a target. For pairing, use `--code`.
+
+## Accept or reject incoming transfers
+
+By default, `hayate receive` shows each offer (name, size, sender, cipher) and asks you to accept it. Pass `--auto-accept` to skip the prompt. Without a terminal, for example under a service manager, you must pass `--auto-accept`: Hayate can't ask for consent and rejects the transfer.
+
+A direct receiver keeps listening for more transfers until you stop it. Add `--once` to exit after the first transfer or rejection, which is useful in scripts.
+
+Pairing receives always handle a single transfer.
+
+## Existing files
+
+When the destination already exists, `hayate receive` applies an overwrite policy:
+
+| Flag | Behavior |
+| --- | --- |
+| none | Ask whether to overwrite. Without a terminal, refuse the transfer. |
+| `--overwrite` | Replace the existing file without asking. |
+| `--no-overwrite` | Refuse the transfer. |
+
+## Resume an interrupted transfer
+
+Single-file transfers can continue where they stopped. Start the receiver with `--resume` and send the same file again:
+
+```bash
+hayate receive --port 50001 --output ./downloads --resume
+hayate send ./disk-image.iso 192.168.1.50:50001
+```
+
+The receiver keeps the partial file, aligns its length down to the last 4 MiB frame boundary and asks the sender to continue from there. The final checksum covers the entire file, including the part received earlier. Directory transfers can't resume.
+
+## Compression and hashing
+
+`hayate send` compresses frames with zstd level 1 by default. Hayate skips compression for formats that are already compressed, and turns it off automatically when the data turns out to be incompressible. Pass `--no-compress` (or `--compress=false`) to turn it off entirely.
+
+Integrity uses BLAKE3 by default. Pass `--hash sha256` if you need SHA-256.
+
+## Limit bandwidth
+
+Cap the sender's sustained throughput with `--bandwidth-limit`:
+
+```bash
+hayate send ./movie.mkv 192.168.1.50:50001 --bandwidth-limit 10MiB
+```
+
+The value is bytes per second. Plain numbers are bytes. Binary units are `KiB`, `MiB` and `GiB`, and decimal units are `K`/`KB`, `M`/`MB` and `G`/`GB`. Fractions such as `1.5MiB` work too. Units are case-insensitive.
+
+## Save receivers as peers
+
+Name the receivers you send to often:
+
+```bash
+hayate peers add laptop 192.168.1.20:50001
+hayate send ./movie.mkv --to laptop
+```
+
+See [peers and history](/cli/peers-and-history) for the full command set.

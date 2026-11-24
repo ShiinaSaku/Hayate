@@ -1,0 +1,52 @@
+---
+title: "Performance"
+description: "How Hayate's transfer pipeline keeps disks and networks busy, how to measure throughput on your hardware, and how to tune Linux socket buffers."
+---
+
+Hayate splits a transfer into stages that run in parallel, so reading, hashing, compressing, encrypting and sending overlap.
+
+On the sender, data flows through these stages:
+
+1. Up to eight async reads of 4 MiB each.
+2. A dedicated hasher thread.
+3. Worker threads that compress with zstd and encrypt with AEAD.
+4. The QUIC flow-control window, then the network.
+
+On the receiver, frames are decrypted, put back in order, hashed and written sequentially.
+
+## Pipeline
+
+- **Read-ahead.** Up to eight concurrent 4 MiB reads keep the disk busy while cryptography runs.
+- **Dedicated hasher.** BLAKE3 or SHA-256 runs on its own thread, so hashing large frames never stalls the async event loop.
+- **Worker threads.** Compression and encryption run on dedicated threads connected by channels.
+- **Bounded queues.** Every stage has a bounded queue. A slow disk or network applies backpressure instead of filling memory with buffered frames.
+- **Cipher negotiation.** The receiver picks AES-256-GCM when the CPU has hardware AES, and ChaCha20-Poly1305 otherwise. Set `HAYATE_FORCE_CHACHA20` to force ChaCha20-Poly1305.
+- **Adaptive compression.** zstd level 1 is skipped for already-compressed file extensions. Hayate also turns it off after 16 MiB if the data is effectively incompressible.
+- **Ordered writes.** The receiver reorders frames before writing, so disk I/O stays sequential.
+
+Hayate runs on [compio](https://github.com/compio-rs/compio), a completion-based async runtime that uses io_uring on Linux, IOCP on Windows and kqueue on macOS.
+
+## Measure throughput
+
+The repository includes a loopback benchmark. From a clone, run:
+
+```bash
+cargo run --release --example throughput -- ./large.bin 3
+```
+
+The example sends the file to a receiver in the same process over loopback, timing connect, handshake and payload together. The second argument is the number of rounds (default `3`). Set `HAYATE_BENCH_COMPRESS=0` to measure without compression.
+
+Throughput depends heavily on whether the operating system supports UDP segmentation offload (GSO and GRO). Linux has both. macOS currently has neither, so the same pipeline moves far fewer packets per second there.
+
+## Linux socket buffers
+
+If transfers stall under load on Linux, raise the kernel's UDP buffer limits:
+
+```bash
+sudo sysctl -w net.core.rmem_max=134217728
+sudo sysctl -w net.core.wmem_max=134217728
+```
+
+These settings last until reboot. To keep them, add the same keys to a file in `/etc/sysctl.d/`.
+
+macOS and Windows size UDP buffers automatically.

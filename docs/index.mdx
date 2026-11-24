@@ -1,0 +1,98 @@
+---
+title: "Hayate overview"
+sidebarTitle: "Overview"
+description: "Learn about Hayate, the encrypted, compressed file transfer tool that moves files and folders directly between your machines on the local network."
+---
+
+## Get started in 30 seconds
+
+Prerequisites:
+
+- Two machines on the same local network
+- A terminal on each (macOS, Linux, Windows, or Android via Termux)
+
+**Install Hayate on both machines:**
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl --proto '=https' --tlsv1.2 -LsSf \
+      https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-cli-installer.sh | sh
+    ```
+  </Tab>
+  <Tab title="npm">
+    ```bash
+    npm install -g @shiinasaku/hayate
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Download and run `hayate-cli-installer.ps1` from the [latest release](https://github.com/ShiinaSaku/Hayate/releases/latest) in PowerShell.
+  </Tab>
+</Tabs>
+
+**Send a file:**
+
+```bash
+hayate send ./photos.zip
+```
+
+Hayate prints a pairing phrase. **Receive it on the other machine:**
+
+```bash
+hayate receive --code "forest-river-mango-silver-orbit"
+```
+
+That's it. The file arrives encrypted, compressed and verified. [Continue with the quickstart (2 minutes) →](/quickstart)
+
+<Tip>
+  See [installation](/installation) for release archives, building from source, and Android. See [troubleshooting](/guides/discovery#troubleshooting) if the machines can't find each other.
+</Tip>
+
+## What Hayate does for you
+
+- **Pairs machines without addresses.** Run `hayate send`, read out a 5-word phrase, and the receiver finds the sender on its own. When you know the address, send to `ip:port` directly.
+- **Encrypts every transfer.** Each transfer uses a fresh X25519 key exchange. The phrase, stretched with Argon2id, authenticates it, and every 4 MiB frame is sealed with AES-256-GCM or ChaCha20-Poly1305.
+- **Moves folders, not just files.** Directories stream as a tar archive, compressed and encrypted on the fly, and extract safely on the other side.
+- **Recovers from interruptions.** Interrupted files continue from the last frame, and the checksum covers the whole file.
+- **Gives you a dashboard.** `hayate web` opens a local, token-gated page for drag-and-drop sends, a receive listener and live history.
+
+## Why people use Hayate
+
+- **No infrastructure.** There is no relay, rendezvous server or SSH daemon. Nothing leaves your network.
+- **One binary.** A single static binary for macOS, Linux and Windows. No runtime, no accounts.
+- **Fast on a LAN.** QUIC with read-ahead, adaptive zstd compression, and encryption on dedicated threads.
+- **Scriptable.** NDJSON events, stable exit codes, and a Rust library crate for building your own interface.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Pair two machines and send your first file
+  </Card>
+  <Card title="Sending and receiving" icon="arrow-left-right" href="/guides/sending-and-receiving">
+    Directories, resume, overwrites and bandwidth limits
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Every command, flag and exit code
+  </Card>
+  <Card title="Web dashboard" icon="layout-dashboard" href="/guides/dashboard">
+    Send and receive from your browser
+  </Card>
+</CardGroup>
+
+## Additional resources
+
+<CardGroup cols={2}>
+  <Card title="Rust library" icon="box" href="/library/overview">
+    Embed the transfer engine in your own application
+  </Card>
+  <Card title="Security" icon="shield-check" href="/security/how-it-works">
+    How transfers are encrypted, and the threat model
+  </Card>
+  <Card title="Scripting and automation" icon="code" href="/guides/scripting">
+    JSON output, exit codes and unattended receivers
+  </Card>
+  <Card title="Comparison" icon="scale" href="/comparison">
+    How Hayate compares with scp, LocalSend, croc and sendme
+  </Card>
+</CardGroup>

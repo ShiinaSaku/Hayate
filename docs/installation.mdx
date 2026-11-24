@@ -1,0 +1,88 @@
+---
+title: "Install Hayate"
+sidebarTitle: "Installation"
+description: "Install the hayate CLI with the shell installer, npm, a prebuilt release archive or from source, and add the Rust library crate."
+---
+
+Hayate ships as a single static binary for macOS, Linux and Windows on x64 and arm64. Install it on every machine you want to send files between.
+
+<Tabs>
+  <Tab title="Shell installer">
+    On macOS and Linux:
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -LsSf \
+      https://github.com/ShiinaSaku/Hayate/releases/latest/download/hayate-cli-installer.sh | sh
+    ```
+
+    On Windows, download and run `hayate-cli-installer.ps1` from the [latest release](https://github.com/ShiinaSaku/Hayate/releases/latest) in PowerShell.
+  </Tab>
+  <Tab title="npm">
+    ```bash
+    npm install -g @shiinasaku/hayate
+    ```
+
+    To run Hayate without installing it:
+
+    ```bash
+    npx @shiinasaku/hayate --help
+    ```
+
+    The package downloads the matching prebuilt binary for your platform at install time.
+  </Tab>
+  <Tab title="Release archive">
+    Every [GitHub release](https://github.com/ShiinaSaku/Hayate/releases) includes prebuilt `.tar.xz` and `.zip` archives, installers, a `sha256.sum` file and build-provenance attestations.
+
+    Extract the archive and put the `hayate` binary somewhere on your `PATH`.
+  </Tab>
+  <Tab title="From source">
+    You need Rust 1.96 or later (edition 2024).
+
+    ```bash
+    git clone https://github.com/ShiinaSaku/Hayate.git
+    cd Hayate
+    cargo build --release -p hayate-cli
+    ./target/release/hayate --help
+    ```
+
+    If you use [mise](https://mise.jdx.dev), `mise run build` does the same. The dashboard bundle is committed to the repository, so you don't need a JavaScript toolchain to build the CLI.
+  </Tab>
+</Tabs>
+
+## Android (Termux)
+
+There is no prebuilt Android binary. Build one from a clone of the repository on a development machine:
+
+```bash
+mise run android
+```
+
+The task adds the `aarch64-linux-android` Rust target and cross-compiles `hayate-cli` in release mode. Copy the resulting binary into Termux. In Termux or other headless sessions, `--no-progress` on `send` and `receive` hides the progress bar.
+
+## Verify the install
+
+```bash
+hayate --version
+```
+
+The command prints the installed version, for example `hayate 7.0.0`.
+
+## Shell completions
+
+Install completions for your shell so flags and subcommands tab-complete:
+
+```bash
+hayate completions zsh --install
+```
+
+See [docs and completions](/cli/docs-and-completions) for every supported shell.
+
+## Rust library
+
+To embed the transfer engine in your own application instead, add the crate:
+
+```bash
+cargo add hayate
+```
+
+Continue with the [library overview](/library/overview).

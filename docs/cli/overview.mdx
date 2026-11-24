@@ -1,0 +1,70 @@
+---
+title: "CLI overview"
+description: "The hayate command, its subcommands and aliases, global flags for output, color and verbosity, and the environment variables it reads."
+---
+
+```bash
+hayate [GLOBAL FLAGS] <COMMAND> [ARGS]
+```
+
+## Commands
+
+<CardGroup cols={2}>
+  <Card title="send" icon="send" href="/cli/send">
+    Send a file or directory. Alias: `tx`.
+  </Card>
+  <Card title="receive" icon="download" href="/cli/receive">
+    Wait for a transfer. Aliases: `recv`, `rx`.
+  </Card>
+  <Card title="discover" icon="radar" href="/cli/discover">
+    Find receivers on the network. Alias: `scan`.
+  </Card>
+  <Card title="web" icon="layout-dashboard" href="/cli/web">
+    Serve the local dashboard. Alias: `dashboard`.
+  </Card>
+  <Card title="peers and history" icon="users" href="/cli/peers-and-history">
+    Named peers (`peer`) and past transfers (`log`).
+  </Card>
+  <Card title="docs and completions" icon="book-open" href="/cli/docs-and-completions">
+    In-terminal guide, shell completions and the man page.
+  </Card>
+</CardGroup>
+
+Run `hayate <COMMAND> --help` for the built-in help.
+
+## Global flags
+
+These flags work with every command.
+
+<ParamField path="--color" type="auto | always | never" default="auto">
+  Color policy. `auto` colors output only when stdout is a terminal, and honors `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE`.
+</ParamField>
+
+<ParamField path="--format" type="pretty | plain | json" default="pretty">
+  Output format. `plain` prints text without styling or progress bars. `json` prints [NDJSON events](/cli/json-events).
+</ParamField>
+
+<ParamField path="-q, --quiet" type="flag">
+  Show warnings and errors only, and hide progress bars. Repeatable.
+</ParamField>
+
+<ParamField path="-v, --verbose" type="flag">
+  Show more detail. Repeatable, for example `-vv`.
+</ParamField>
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `HAYATE_BIND` | Default `--bind` for `hayate receive` |
+| `HAYATE_PORT` | Default `--port` for `hayate receive` |
+| `HAYATE_FORCE_CHACHA20` | Force ChaCha20-Poly1305 instead of AES-256-GCM |
+| `HAYATE_ASCII` | Use ASCII-only status glyphs |
+| `NO_COLOR` | Turn off color |
+| `COLUMNS` | Terminal width fallback |
+| `TERM=dumb` | Turn off Unicode decoration |
+
+## Files
+
+- **Saved peers:** `hayate/peers.json` in your config directory, for example `~/.config/hayate/peers.json` on Linux.
+- **Transfer history:** `hayate/history.jsonl` in your data directory, for example `~/.local/share/hayate/history.jsonl` on Linux.

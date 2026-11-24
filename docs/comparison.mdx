@@ -1,0 +1,51 @@
+---
+title: "Comparison"
+description: "How Hayate compares with scp, rsync, Magic Wormhole, LocalSend, croc and sendme for moving files between machines."
+---
+
+Hayate is a LAN tool. It needs no server, relay or SSH daemon, and it pairs machines with a short phrase.
+
+## At a glance
+
+| Tool | Needs a server or relay |
+| --- | --- |
+| **Hayate** | No |
+| scp / rsync | An SSH server (sshd) |
+| Magic Wormhole | Yes, a public rendezvous server |
+| LocalSend | No |
+| croc | Optional relay |
+| sendme | iroh relay as a fallback |
+
+## How each tool works
+
+<AccordionGroup>
+  <Accordion title="Hayate">
+    QUIC on compio. Finds receivers with mDNS and a UDP query. Encrypts with X25519, Argon2id and per-frame AEAD. Includes a local web dashboard.
+  </Accordion>
+  <Accordion title="scp and rsync">
+    TCP over SSH. You type the address yourself, and the other machine must run an SSH server.
+  </Accordion>
+  <Accordion title="Magic Wormhole">
+    TCP with TLS, connected through a rendezvous server. Uses a PAKE with a short code.
+  </Accordion>
+  <Accordion title="LocalSend">
+    HTTP or HTTPS with TLS. Finds devices with mDNS.
+  </Accordion>
+  <Accordion title="croc">
+    TCP through a relay, paired with a code phrase. Uses a PAKE.
+  </Accordion>
+  <Accordion title="sendme">
+    QUIC on iroh, connected with a ticket or iroh DNS. Uses TLS, and falls back to an iroh relay.
+  </Accordion>
+</AccordionGroup>
+
+## Hayate and sendme
+
+sendme is the closest comparison. It is built on iroh, so it can cross the internet and traverse NAT, which Hayate does not do.
+
+Hayate stays infrastructure-free and LAN-only on purpose. On a local network it avoids relay and DNS round trips, compresses payloads, and pairs with a short phrase instead of a long ticket.
+
+## When to use something else
+
+- To send across the internet, use a tool with relay support, such as sendme, croc or Magic Wormhole.
+- To sync a directory tree incrementally, use rsync.

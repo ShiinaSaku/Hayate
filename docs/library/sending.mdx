@@ -1,0 +1,126 @@
+---
+title: "Sending"
+description: "Send files and directories from Rust with HayateSender: direct and pairing modes, passphrases, compression, hashing, bandwidth limits and lifecycle stages."
+---
+
+`HayateSender` is a builder. Configure it, then call `send` or `send_with` with a path to a file or directory.
+
+## Direct mode
+
+Set the receiver's address with `target`:
+
+```rust
+use std::net::SocketAddr;
+use hayate::HayateSender;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let target: SocketAddr = "192.168.1.50:50001".parse().unwrap();
+
+    let checksum = HayateSender::new()
+        .target(target)
+        .passphrase("correct horse battery staple".to_owned())
+        .send("photos", |bytes_sent| {
+            println!("sent {bytes_sent} bytes");
+            Ok(())
+        })
+        .await?;
+
+    println!("checksum {checksum}");
+    Ok(())
+}
+```
+
+`passphrase` is optional. Without it, a direct transfer is not authenticated. When you set it, the receiver must use the same passphrase.
+
+## Pairing mode
+
+Set a phrase with `code` and leave out `target`. The sender broadcasts on the LAN until a receiver with the same phrase connects. The phrase also authenticates the key exchange.
+
+```rust
+use hayate::HayateSender;
+
+async fn run() -> Result<(), hayate::EngineError> {
+    HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .send("report.pdf", |_| Ok(()))
+        .await?;
+    Ok(())
+}
+```
+
+## Builder options
+
+<ParamField path="target(SocketAddr)">
+  Receiver address for direct mode.
+</ParamField>
+
+<ParamField path="code(String)">
+  Pairing phrase. It is also used as the passphrase unless you set `passphrase`.
+</ParamField>
+
+<ParamField path="passphrase(String)">
+  Secret stretched with Argon2id into the key derivation.
+</ParamField>
+
+<ParamField path="compress(bool)" default="true">
+  zstd compression.
+</ParamField>
+
+<ParamField path="hash_algo(String)" default="blake3">
+  `"blake3"` or `"sha256"`.
+</ParamField>
+
+<ParamField path="bandwidth_limit(u64)" default="unlimited">
+  Sustained throughput cap in bytes per second.
+</ParamField>
+
+## Progress
+
+The progress callback receives the total number of bytes written to the network so far. Return `Ok(())` to continue, or an `EngineError` to abort the transfer.
+
+`send` returns the payload checksum as a string such as `blake3$…`.
+
+## Lifecycle stages
+
+To drive a UI, use `send_with`. It takes a stage callback before the progress callback and returns a `SendOutcome`:
+
+```rust
+use hayate::{HayateSender, TransferStage};
+
+async fn run() -> Result<(), hayate::EngineError> {
+    let outcome = HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .send_with(
+            "photos",
+            |stage| {
+                match stage {
+                    TransferStage::Pairing { code } => println!("receiver runs: hayate receive --code {code}"),
+                    TransferStage::Ready { peer, total_size, .. } => println!("sending {total_size} bytes to {peer}"),
+                    _ => {}
+                }
+                Ok(())
+            },
+            |_bytes| Ok(()),
+        )
+        .await?;
+
+    println!("{} via cipher {}", outcome.checksum, outcome.cipher_id);
+    Ok(())
+}
+```
+
+`SendOutcome` has `checksum`, `meta`, `cipher_id`, `peer` and `total_size`.
+
+A sender reports these `TransferStage` variants:
+
+- `Connecting { peer }`: dialing a known receiver.
+- `Pairing { code }`: broadcasting the phrase and waiting for a receiver.
+- `Connected { peer }`: the QUIC connection is open.
+- `Handshaking`: version, cipher and key exchange are in progress.
+- `Ready { meta, cipher_id, peer, total_size }`: the handshake is done and the payload is about to start.
+- `Resuming { offset }`: the receiver asked to continue from a byte offset.
+- `Transferring { filename, total_size }`: the payload is flowing.
+- `Finishing`: streams are being drained.
+
+`TransferStage` is `#[non_exhaustive]`, so always include a wildcard arm.

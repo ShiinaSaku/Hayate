@@ -1,0 +1,68 @@
+---
+title: "Scripting and automation"
+description: "Drive Hayate from scripts with NDJSON output, stable exit codes, non-interactive receive flags and environment variables."
+---
+
+Every Hayate command can run unattended. Use JSON output to read results, exit codes to branch on failures, and the flags below to avoid prompts.
+
+## Read JSON events
+
+`--format json` prints one JSON object per line (NDJSON) on stdout, tagged with `"schema": "hayate/1"`. Errors go to stderr in the same format.
+
+```bash
+hayate send ./build.tar.zst 192.168.1.50:50001 --format json \
+  | jq -r 'select(.event == "transfer_complete") | .speed_bps'
+```
+
+See [JSON events](/cli/json-events) for every event type and its fields.
+
+`--format plain` is an alternative when you want readable text without styling or progress bars.
+
+## Check exit codes
+
+Exit codes are stable across releases. Existing codes are never renumbered.
+
+```bash
+hayate send ./backup.tar 192.168.1.50:50001 --passphrase "$HAYATE_SECRET"
+case $? in
+  0) echo "sent" ;;
+  3) echo "receiver rejected the transfer" ;;
+  5) echo "wrong passphrase" ;;
+  6) echo "timed out" ;;
+  *) echo "failed" ;;
+esac
+```
+
+See [exit codes](/cli/exit-codes) for the full list.
+
+## Receive without prompts
+
+A receiver running without a terminal can't ask for consent. Pass the flags that answer each question up front:
+
+```bash
+hayate receive --port 50001 --output /srv/incoming \
+  --auto-accept --no-overwrite --once --format json
+```
+
+- `--auto-accept` accepts every offer.
+- `--overwrite` or `--no-overwrite` decides what happens when the file exists. Without either, a non-interactive receiver refuses the transfer.
+- `--once` exits after the first transfer, so your script gets an exit code for it.
+
+## Control verbosity
+
+- `-q` hides informational output and progress bars, leaving warnings and errors.
+- `-v` adds more detail. You can repeat it, for example `-vv`.
+- `--format json` and `--format plain` also hide progress bars.
+- `--color never` turns off color. Hayate also honors `NO_COLOR`.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `HAYATE_BIND` | Default bind address for `hayate receive` |
+| `HAYATE_PORT` | Default port for `hayate receive` |
+| `HAYATE_FORCE_CHACHA20` | Force ChaCha20-Poly1305 instead of AES-256-GCM |
+| `HAYATE_ASCII` | Use ASCII-only status glyphs |
+| `NO_COLOR` | Turn off color |
+| `COLUMNS` | Terminal width fallback |
+| `TERM=dumb` | Turn off Unicode decoration |

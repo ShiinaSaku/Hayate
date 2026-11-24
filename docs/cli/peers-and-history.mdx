@@ -1,0 +1,46 @@
+---
+title: "Peers and history"
+description: "Reference for hayate peers, which saves named receiver addresses, and hayate history, which lists or clears past transfers."
+---
+
+## hayate peers
+
+Saves receiver addresses under names you can pass to `hayate send --to`. Alias: `peer`.
+
+```bash
+hayate peers add laptop 192.168.1.20:50001
+hayate peers list
+hayate peers remove laptop
+```
+
+| Subcommand | Description |
+| --- | --- |
+| `list` | List saved peers |
+| `add <NAME> <ADDR>` | Save `ADDR` (`ip:port` or `hostname:port`) as `NAME`. Names use letters, digits, `-` and `_`. |
+| `remove <NAME>` | Delete a saved peer. Aliases: `rm`, `delete`. |
+
+Peers are stored in `hayate/peers.json` in your config directory, for example `~/.config/hayate/peers.json` on Linux.
+
+## hayate history
+
+Prints a table of past transfers with direction, peer, size, duration and checksum. Alias: `log`.
+
+```bash
+hayate history
+hayate history -n 10 --format json
+hayate history --clear --yes
+```
+
+<ParamField path="-n, --limit" type="N" default="20">
+  Show at most `N` entries, most recent first. `0` shows all.
+</ParamField>
+
+<ParamField path="--clear" type="flag">
+  Delete the history log. Hayate asks for confirmation first.
+</ParamField>
+
+<ParamField path="--yes" type="flag">
+  Skip the confirmation prompt for `--clear`.
+</ParamField>
+
+History is local-only metadata stored in `hayate/history.jsonl` in your data directory, for example `~/.local/share/hayate/history.jsonl` on Linux. Hayate never sends it anywhere.

@@ -1,0 +1,53 @@
+---
+title: "How a transfer works"
+description: "The steps of a Hayate transfer and the cryptography behind it: QUIC, X25519, Argon2id, HKDF-SHA256, per-frame AEAD and end-to-end checksums."
+---
+
+Every Hayate transfer, from the CLI, the dashboard or the library, follows the same five steps.
+
+<Steps>
+  <Step title="Connect">
+    The sender and receiver open a QUIC connection. QUIC uses an ephemeral self-signed certificate, so TLS alone does not identify the peer. The application-layer handshake that follows is the real authentication.
+  </Step>
+  <Step title="Exchange keys">
+    Both sides check that they speak the same protocol version (currently 8). Each contributes an ephemeral X25519 key. The receiver picks the cipher: AES-256-GCM when its CPU has hardware AES, ChaCha20-Poly1305 otherwise. The sender then sends encrypted metadata: the name, size, transfer type and hash algorithm.
+  </Step>
+  <Step title="Consent">
+    The receiver accepts or rejects the offer. For a single file being resumed, it also sends the offset to continue from, aligned down to a 4 MiB frame boundary.
+  </Step>
+  <Step title="Stream">
+    The sender reads the file ahead, hashes it, compresses it when that helps and seals each 4 MiB frame with AEAD. Directories stream as a tar archive.
+  </Step>
+  <Step title="Verify">
+    Both sides hash the plaintext, including any resumed prefix, and report the checksum as `blake3$…` or `sha256$…`. A file transfer must deliver exactly the announced number of bytes.
+  </Step>
+</Steps>
+
+## Cryptography
+
+| Layer | Primitive |
+| --- | --- |
+| Key agreement | Ephemeral X25519 ECDH |
+| Passphrase stretching | Argon2id, 19 MiB memory, 2 iterations, 1 lane |
+| Key derivation | HKDF-SHA256 with a random per-session salt and a transcript-bound info string |
+| Frame encryption | AES-256-GCM or ChaCha20-Poly1305 with a unique 96-bit nonce per frame |
+| Integrity | BLAKE3 or SHA-256 over the plaintext, plus the AEAD tag on every frame |
+| Metadata | Encrypted and authenticated before the receiver uses it |
+
+When you pair with a phrase or pass `--passphrase`, Hayate stretches the secret with Argon2id and mixes it into the HKDF input keying material. A peer that doesn't know the secret derives a different key, so the handshake fails before any file data is sent.
+
+Pairing phrases are five words drawn from a 300-word list, about 41 bits of entropy.
+
+Payload frames use a per-worker nonce prefix plus a 64-bit counter. Nonces never repeat within a session, and the hot loop never calls the random number generator.
+
+AEAD, HKDF and SHA-256 come from [ring](https://github.com/briansmith/ring), hashing from [BLAKE3](https://github.com/BLAKE3-team/BLAKE3), and Argon2id from the RustCrypto `argon2` crate. Hayate does not implement its own primitives.
+
+## Untrusted input
+
+The receiver treats everything from the peer as untrusted:
+
+- Metadata is decrypted and authenticated before use, and unknown transfer types are rejected.
+- Payload frames are length-capped and authenticated before anything is written.
+- Directory extraction rejects absolute paths, `..` components and symlinks. Hard links are replayed only after their target is extracted.
+
+For what these protections don't cover, see the [threat model](/security/threat-model).

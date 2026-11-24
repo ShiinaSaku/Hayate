@@ -1,0 +1,60 @@
+---
+title: "Library overview"
+description: "Embed Hayate's encrypted LAN transfer engine in a Rust application with the hayate crate, HayateSender and HayateReceiver on a compio runtime."
+---
+
+The `hayate` crate is the transfer engine behind the CLI and the dashboard. Use it to build your own interface on top of the same protocol.
+
+## Install
+
+```toml Cargo.toml
+[dependencies]
+hayate = "7"
+compio = { version = "0.19", features = ["macros", "runtime", "fs", "net", "time"] }
+```
+
+Hayate requires Rust 1.96 or later.
+
+## Runtime
+
+Hayate runs on [compio](https://github.com/compio-rs/compio), a completion-based async runtime, not tokio. Public APIs don't expose compio types, but the futures they return must run inside a compio runtime, usually through `#[compio::main]`.
+
+## First transfer
+
+```rust
+use hayate::HayateSender;
+
+#[compio::main]
+async fn main() -> Result<(), hayate::EngineError> {
+    let checksum = HayateSender::new()
+        .code("forest-river-mango-silver-orbit".to_owned())
+        .compress(true)
+        .send("./file.txt", |bytes| {
+            println!("sent {bytes} bytes");
+            Ok(())
+        })
+        .await?;
+
+    println!("done: {checksum}");
+    Ok(())
+}
+```
+
+A receiver joins with the same phrase, either from the CLI (`hayate receive --code "forest-river-mango-silver-orbit"`) or with [`HayateReceiver`](/library/receiving).
+
+## Public API
+
+The stable surface is the `runner` module and the types re-exported at the crate root:
+
+- `HayateSender`: builder that sends a file or directory. See [sending](/library/sending).
+- `HayateReceiver`: builder that receives one transfer or binds a listener. See [receiving](/library/receiving).
+- `ListeningReceiver`: a bound listener that accepts several direct transfers in sequence.
+- `TransferStage`: lifecycle events reported by the staged APIs.
+- `SendOutcome` and `ReceiveOutcome`: results of staged transfers.
+- `Metadata` and `TransferKind`: what is being transferred (name, size, and file or directory).
+- `EngineError`: every failure the engine reports. See [errors](/library/errors).
+- `DiscoveredPeer` and `BroadcasterGuard`: discovery types.
+
+The `protocol`, `crypto`, `network`, `discovery` and `local_addr` modules are public too. Modules hidden from the documentation are internals: they may change in any release and aren't covered by semver.
+
+Full API documentation is on [docs.rs/hayate](https://docs.rs/hayate).
