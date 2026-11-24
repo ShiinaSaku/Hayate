@@ -18,13 +18,13 @@
     "default": "system"
   },
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg",
+    "light": "/docs/images/logo.svg",
+    "dark": "/images/logo.svg",
     "href": "/"
   },
   "favicon": "/favicon.svg",
   "icons": {
-    "library": "lucide"
+    "library": "fontawesome"
   },
   "navbar": {
     "links": [
