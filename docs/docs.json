@@ -18,7 +18,7 @@
     "default": "system"
   },
   "logo": {
-    "light": "/docs/images/logo.svg",
+    "light": "/images/logo.svg",
     "dark": "/images/logo.svg",
     "href": "/"
   },
