@@ -3,9 +3,9 @@
     Hayate mark: three forward chevrons (gale / 疾風) with speed trails.
     Built on a 120-unit grid; chevrons share one 90° vertex and a constant
     24-unit offset so the rhythm reads cleanly from favicon to hero size.
-    Single #0071e3 fill context — inherits light/dark theme color.
+    Single #737373 fill context — inherits light/dark theme color.
   -->
-  <g fill="none" stroke="#0071e3" stroke-linecap="round" stroke-linejoin="round">
+  <g fill="none" stroke="#737373" stroke-linecap="round" stroke-linejoin="round">
     <!-- Speed trails -->
     <line x1="6"  y1="60" x2="22" y2="60" stroke-width="6" stroke-opacity="0.35" />
     <line x1="10" y1="42" x2="20" y2="42" stroke-width="5" stroke-opacity="0.18" />

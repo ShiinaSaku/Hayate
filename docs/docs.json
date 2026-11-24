@@ -1,17 +1,17 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "maple",
+  "theme": "willow",
   "name": "Hayate",
   "description": "Encrypted, compressed LAN file transfer. One binary, no cloud, no accounts, no SSH.",
   "colors": {
-    "primary": "#0071e3",
-    "light": "#0a84ff",
-    "dark": "#0071e3"
+    "primary": "#171717",
+    "light": "#fafafa",
+    "dark": "#171717"
   },
   "background": {
     "color": {
-      "light": "#f5f5f7",
-      "dark": "#000000"
+      "light": "#ffffff",
+      "dark": "#0a0a0a"
     }
   },
   "appearance": {
@@ -47,9 +47,11 @@
     }
   },
   "navigation": {
-    "tabs": [
+    "dropdowns": [
       {
-        "tab": "Guides",
+        "dropdown": "Guides",
+        "icon": "book-open",
+        "description": "Install, use and secure Hayate",
         "groups": [
           {
             "group": "Get started",
@@ -84,7 +86,9 @@
         ]
       },
       {
-        "tab": "CLI reference",
+        "dropdown": "CLI reference",
+        "icon": "terminal",
+        "description": "Every command, flag and exit code",
         "groups": [
           {
             "group": "Commands",
@@ -108,7 +112,9 @@
         ]
       },
       {
-        "tab": "Rust library",
+        "dropdown": "Rust library",
+        "icon": "box",
+        "description": "Embed the transfer engine",
         "groups": [
           {
             "group": "Library",
@@ -131,9 +137,19 @@
   "contextual": {
     "options": [
       "copy",
-      "view",
-      "chatgpt",
-      "claude"
+      "view"
     ]
+  },
+  "fonts": {
+    "family": "Geist"
+  },
+  "styling": {
+    "eyebrows": "breadcrumbs",
+    "codeblocks": {
+      "theme": {
+        "light": "github-light",
+        "dark": "github-dark"
+      }
+    }
   }
 }
